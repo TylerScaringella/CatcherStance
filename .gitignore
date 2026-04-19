@@ -2,3 +2,5 @@ data/*
 .venv/*
 *.mp4
 __pycache__/*
+*.json
+*.csv
