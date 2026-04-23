@@ -517,6 +517,20 @@ def candidate_rejection_reason(
         and feats["aspect_ratio"] > 1.90
     ):
         return "too_tall_and_low_for_catcher", meta
+    # Another common pitcher false-positive: not extremely tall, but still lower in
+    # frame than the catcher while having a taller box and less compressed lower-body
+    # geometry than a real receiving stance.
+    if (
+        feats["bottom_y_norm"] is not None
+        and feats["compactness"] is not None
+        and feats["box_h_norm"] is not None
+        and feats["aspect_ratio"] is not None
+        and feats["bottom_y_norm"] > 0.67
+        and feats["compactness"] < 0.95
+        and feats["box_h_norm"] > 0.28
+        and feats["aspect_ratio"] > 1.35
+    ):
+        return "pitcher_like_low_tall_geometry", meta
     if feats["avg_knee_angle"] is None:
         return "missing_knee_angle", meta
     min_knee_angle = feats.get("min_knee_angle")
@@ -551,7 +565,22 @@ def candidate_rejection_reason(
     if feats["compactness"] is None:
         return "missing_compactness", meta
     if feats["compactness"] < cfg.min_compactness or feats["compactness"] > cfg.max_compactness:
-        return "bad_compactness", meta
+        allow_deep_crouch_catcher = (
+            feats["compactness"] is not None
+            and feats["compactness"] <= 4.0
+            and overlap >= 0.80
+            and anchor_dist_norm <= 0.32
+            and feats["bottom_y_norm"] is not None
+            and 0.54 <= feats["bottom_y_norm"] <= 0.70
+            and feats["width_ratio"] is not None
+            and feats["width_ratio"] >= 1.50
+            and feats["aspect_ratio"] is not None
+            and 0.95 <= feats["aspect_ratio"] <= 1.80
+            and feats["shoulder_to_ankle_dx_norm"] is not None
+            and feats["shoulder_to_ankle_dx_norm"] <= 0.03
+        )
+        if not allow_deep_crouch_catcher:
+            return "bad_compactness", meta
     if feats["width_ratio"] is None or feats["width_ratio"] < cfg.min_width_ratio:
         return "stance_too_narrow", meta
 
@@ -583,7 +612,7 @@ def score_candidate(
         # Still useful, but not so dominant that it overrules better stance geometry.
         "anchor_distance": 0.18 * _score_inverse_band(anchor_dist_norm, 0.05, 0.30),
         # Catcher should sit in a preferred lower-middle vertical band, not simply "lower is better".
-        "bottom_position": 0.14 * _score_peak(feats["bottom_y_norm"], 0.50, 0.58, 0.70, 0.82),
+        "bottom_position": 0.14 * _score_peak(feats["bottom_y_norm"], 0.50, 0.56, 0.66, 0.74),
         # Reward either a strong two-knee crouch or a one-knee asymmetric catcher stance.
         "knee_bend": 0.08 * _score_inverse_band(feats["avg_knee_angle"], 115.0, 162.0),
         "single_knee_bend": 0.08 * _score_inverse_band(feats.get("min_knee_angle"), 105.0, 150.0),
@@ -627,13 +656,14 @@ def detect_catcher(
     confs = _to_numpy(result.boxes.conf)
     keypoints = _to_numpy(result.keypoints.xy)
 
-    if frame is not None:
-        frame_h, frame_w = frame.shape[:2]
+    if hasattr(result, "orig_shape") and result.orig_shape is not None:
+        frame_shape = tuple(result.orig_shape)  # (h, w)
+    elif frame is not None:
+        frame_shape = frame.shape[:2]
     else:
-        # Fallback if you only pass the Ultralytics result.
         frame_w = int(np.max(boxes[:, [0, 2]]) + 1)
         frame_h = int(np.max(boxes[:, [1, 3]]) + 1)
-    frame_shape = (frame_h, frame_w)
+        frame_shape = (frame_h, frame_w)
 
     valid_frame, gate_meta = frame_is_valid_for_catcher(
         boxes=boxes,
@@ -709,12 +739,18 @@ def detect_catcher(
             print(f"Abstain: best score too low ({best['score']:.3f} < {cfg.min_score:.3f})")
         return None
 
-    # Final abstention: even a decent shape should still be close to the plate anchor.
-    if best["anchor_dist_norm"] > cfg.max_final_anchor_dist_norm:
+    # Final abstention: anchor distance should matter less once the candidate is already
+    # very strong on overlap + pose geometry. This keeps a shared config usable across
+    # slightly different camera placements.
+    effective_max_final_anchor_dist = cfg.max_final_anchor_dist_norm
+    if best["score"] >= 0.72:
+        effective_max_final_anchor_dist = max(effective_max_final_anchor_dist, 0.36)
+
+    if best["anchor_dist_norm"] > effective_max_final_anchor_dist:
         if debug:
             print(
                 "Abstain: best candidate too far from catcher anchor "
-                f"({best['anchor_dist_norm']:.3f})"
+                f"({best['anchor_dist_norm']:.3f} > {effective_max_final_anchor_dist:.3f})"
             )
         return None
 
@@ -742,18 +778,13 @@ def detect_catcher(
 
 
 def detect_catcher_from_res_item(
-    item: Dict[str, Any],
+    result: Any,
     cfg: Optional[CatcherDetectionConfig] = None,
     debug: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    """
-    Convenience wrapper for your existing structure:
-    res[i]["result"], res[i]["frame"]
-    """
-
     return detect_catcher(
-        result=item["result"],
-        frame=item.get("frame"),
+        result=result,
+        frame=None,
         cfg=cfg,
         debug=debug,
     )
