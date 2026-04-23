@@ -1,3 +1,3 @@
 # Downloader
 
-Download pitch-by-pitch videos from TruMedia. 
+Download pitch-by-pitch videos from TruMedia.
