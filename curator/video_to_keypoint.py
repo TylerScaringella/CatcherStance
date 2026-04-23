@@ -1,7 +1,9 @@
 from pathlib import Path
+import argparse
 import sys
 import os
 import csv
+import multiprocessing as mp
 
 import numpy as np
 from tqdm import tqdm
@@ -14,41 +16,45 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from notebook.catcher_detection import CatcherDetectionConfig, detect_catcher_from_res_item
 
-# Load the CSV of the labeled videos to prep for creating the keypoint dataset
-
 LABELED_VIDEO_PATH = PROJECT_ROOT / "data/labeled_videos/labeled-videos-2026-04-22-00-05-e3d836a2.csv"
-
-original_videos = []
-
-with open(LABELED_VIDEO_PATH, mode='r', newline='') as f:
-    reader = csv.DictReader(f)
-    original_videos = [row for row in reader]
-
-# Filter out videos labeled as a bad video
-# Transform the path to be relative to working directory instead of LabelStudio
-# Also get rid of the columns that we don't want
+DATASET_OUTPUT_PATH = PROJECT_ROOT / "data/dataset/keypoints-labeled.csv"
+MODEL_PATH = PROJECT_ROOT / "notebook/yolo26n-pose.pt"
 
 DESIRED_COLUMNS = ['id', 'choice', 'video']
+NUM_FRAMES = 7
+CSV_FIELDNAMES = ["choice", "id", "features", "status"]
+DEFAULT_NUM_WORKERS = 2
 
-filtered_videos = []
+_worker_model = None
+filtered_videos = None
 
-for video in original_videos:
-    # if labeled as bad, or no label
-    if video['choice'] == 'Bad Video' or video['choice'] == '':
-        continue
 
-    filtered_video = {k: v for k, v in video.items() if k in DESIRED_COLUMNS}
+def load_filtered_videos():
+    """Load labeled videos and convert Label Studio paths to local file paths."""
+    original_videos = []
 
-    # Transform the local studio path into our relative directory path
-    video_file_name = video['video'].replace('/data/local-files/?d=downloads/', '')
-    video_path = PROJECT_ROOT / "downloader/downloads" / video_file_name
+    with open(LABELED_VIDEO_PATH, mode='r', newline='') as f:
+        reader = csv.DictReader(f)
+        original_videos = [row for row in reader]
 
-    filtered_video['video'] = str(video_path)
-    
-    filtered_videos.append(filtered_video)
+    filtered_videos = []
 
-# Load the pose model
-model = YOLO(str(PROJECT_ROOT / 'notebook/yolo26n-pose.pt'))
+    for video in original_videos:
+        # If labeled as bad, or no label, do not include it in the dataset.
+        if video['choice'] == 'Bad Video' or video['choice'] == '':
+            continue
+
+        filtered_video = {k: v for k, v in video.items() if k in DESIRED_COLUMNS}
+
+        # Transform the local studio path into our relative directory path.
+        video_file_name = video['video'].replace('/data/local-files/?d=downloads/', '')
+        video_path = PROJECT_ROOT / "downloader/downloads" / video_file_name
+
+        filtered_video['video'] = str(video_path)
+        filtered_videos.append(filtered_video)
+
+    return filtered_videos
+
 
 cfg = CatcherDetectionConfig(
     search_roi_norm=(0.30, 0.42, 0.70, 0.98),
@@ -66,6 +72,7 @@ cfg = CatcherDetectionConfig(
     min_aspect_ratio=0.7,
     max_compactness=2.30,
 )
+
 
 def pad_last(items, target_len):
     """
@@ -111,8 +118,17 @@ def normalize_keypoints(kpts):
     return kpts
 
 
-# The amount of detected frames we are going to use to curate our dataset
-NUM_FRAMES = 7
+def init_worker(model_path):
+    """
+    Initialize a YOLO model inside each worker process.
+
+    The model is intentionally not created in the parent and shared across
+    processes. Each process owns its model instance, which avoids pickle/device
+    issues and keeps multiprocessing behavior predictable on macOS.
+    """
+    global _worker_model
+    _worker_model = YOLO(str(model_path))
+
 
 def process_video(video):
     """
@@ -128,12 +144,13 @@ def process_video(video):
     # TODO: MAKE SURE THAT WE ARE NORMALIZING
     # ^ LOOK AT CHATGPT HISTORY TO SEE HOW THAT IS DONE
 
-    print(video)
+    if _worker_model is None:
+        raise RuntimeError("Worker YOLO model has not been initialized.")
 
     # keypoints of detected catcher in each frame
     catcher_detections = []
 
-    results = model(
+    results = _worker_model(
         video, 
         show=False,
         stream=True,
@@ -178,43 +195,181 @@ def process_video(video):
     return sample
 
 
-# Process all of the videos and create the dataset
+def ensure_output_csv_schema(output_path):
+    """
+    Ensure the output CSV has the resumable schema.
 
-DATASET_OUTPUT_PATH = PROJECT_ROOT / "data/dataset/keypoints-labeled.csv"
-os.makedirs(DATASET_OUTPUT_PATH.parent, exist_ok=True)
+    Older runs wrote only choice,id,features. If that file exists, rewrite it
+    once with status=ok for those already-created samples so resume can treat
+    them as completed IDs and future appends match the header.
+    """
+    if not output_path.exists():
+        return
 
-# Load already-processed IDs so you can resume after a crash
-done_ids = set()
-if DATASET_OUTPUT_PATH.exists():
-    with open(DATASET_OUTPUT_PATH, "r", newline="") as f:
+    with open(output_path, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames == CSV_FIELDNAMES:
+            return
+
+        rows = []
+        for row in reader:
+            rows.append({
+                "choice": row.get("choice", ""),
+                "id": row.get("id", ""),
+                "features": row.get("features", ""),
+                "status": row.get("status") or "ok",
+            })
+
+    with open(output_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(rows)
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def load_completed_ids(output_path):
+    """
+    Load IDs already present in the CSV.
+
+    Resume works by treating any row already written by the main process as
+    completed, including status=no_valid_catcher. That prevents invalid videos
+    from being retried forever after a restart.
+    """
+    done_ids = set()
+    if not output_path.exists():
+        return done_ids
+
+    with open(output_path, "r", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            done_ids.add(row["id"])
+            video_id = row.get("id")
+            if video_id:
+                done_ids.add(video_id)
 
-fieldnames = ["choice", "id", "features"]
-file_exists = DATASET_OUTPUT_PATH.exists()
+    return done_ids
 
-with open(DATASET_OUTPUT_PATH, mode="a", newline="") as f:
-    writer = csv.DictWriter(f, fieldnames=fieldnames)
 
-    if not file_exists:
-        writer.writeheader()
+def build_pending_videos(videos, done_ids):
+    """
+    Return videos that still need work, de-duplicated by ID.
 
-    for video in tqdm(filtered_videos, desc="Videos"):
-        if video["id"] in done_ids:
+    This avoids duplicate work in two ways:
+    1. IDs already saved in the output CSV are not dispatched on restart.
+    2. Duplicate IDs in the source labels are collapsed before multiprocessing,
+       so two workers are never given the same ID during one run.
+    """
+    pending = []
+    queued_ids = set()
+
+    for video in videos:
+        video_id = video["id"]
+        if video_id in done_ids or video_id in queued_ids:
             continue
 
-        processed_video = process_video(video["video"])
+        pending.append(video)
+        queued_ids.add(video_id)
 
-        # not valid, so we skip it
-        if processed_video is None:
-            continue
+    return pending
 
-        dataset_entry = {
-            "choice": video["choice"],
-            "id": video["id"],
-            "features": processed_video.tolist(),  # CSV-safe
+
+def process_video_record(video_record):
+    """
+    Worker entry point.
+
+    Workers only compute and return a dataset row. The parent process is the
+    only process that writes to disk, which keeps the CSV append path safe.
+    """
+    try:
+        processed_video = process_video(video_record["video"])
+    except Exception as exc:
+        return {
+            "choice": video_record["choice"],
+            "id": video_record["id"],
+            "features": "",
+            "status": f"error:{type(exc).__name__}",
         }
 
-        writer.writerow(dataset_entry)
-        f.flush()
+    if processed_video is None:
+        return {
+            "choice": video_record["choice"],
+            "id": video_record["id"],
+            "features": "",
+            "status": "no_valid_catcher",
+        }
+
+    return {
+        "choice": video_record["choice"],
+        "id": video_record["id"],
+        "features": processed_video.tolist(),
+        "status": "ok",
+    }
+
+
+def append_result(writer, output_file, row):
+    """Append one result and flush it immediately for crash-safe progress."""
+    writer.writerow(row)
+    output_file.flush()
+    os.fsync(output_file.fileno())
+
+
+def generate_dataset(num_workers=DEFAULT_NUM_WORKERS):
+    global filtered_videos
+
+    os.makedirs(DATASET_OUTPUT_PATH.parent, exist_ok=True)
+    ensure_output_csv_schema(DATASET_OUTPUT_PATH)
+
+    if filtered_videos is None:
+        filtered_videos = load_filtered_videos()
+
+    done_ids = load_completed_ids(DATASET_OUTPUT_PATH)
+    pending_videos = build_pending_videos(filtered_videos, done_ids)
+    file_exists = DATASET_OUTPUT_PATH.exists()
+
+    with open(DATASET_OUTPUT_PATH, mode="a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES)
+
+        if not file_exists:
+            writer.writeheader()
+            f.flush()
+            os.fsync(f.fileno())
+
+        if not pending_videos:
+            print("No pending videos to process.")
+            return
+
+        # Use spawn explicitly for macOS/laptop friendliness. tqdm is wrapped
+        # around imap_unordered so progress advances as videos finish, not in
+        # source order.
+        ctx = mp.get_context("spawn")
+        with ctx.Pool(
+            processes=num_workers,
+            initializer=init_worker,
+            initargs=(MODEL_PATH,),
+        ) as pool:
+            results = pool.imap_unordered(process_video_record, pending_videos)
+
+            for row in tqdm(results, total=len(pending_videos), desc="Videos"):
+                video_id = row["id"]
+                if video_id in done_ids:
+                    continue
+
+                append_result(writer, f, row)
+                done_ids.add(video_id)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Generate a resumable catcher keypoint dataset from labeled videos."
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=DEFAULT_NUM_WORKERS,
+        help="Number of worker processes to use. Keep this small on a laptop.",
+    )
+    return parser.parse_args()
+
+if __name__ == "__main__":
+    args = parse_args()
+    generate_dataset(num_workers=args.workers)
