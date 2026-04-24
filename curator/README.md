@@ -1,3 +1,10 @@
 # Curator
 
-Take labeled pitch-by-pitch videos, and run each video through the catcher detection system to extract the keypoints of the catcher to create the official dataset used to train the classification model.
+Builds the labeled keypoint dataset used to train and evaluate the stance classifier.
+
+Main entry point: `video_to_keypoint.py`
+
+Important modules:
+- `features.py`: extracts catcher keypoint features from one video.
+- `dataset.py`: runs feature extraction over labeled videos and writes the dataset CSV.
+- `config.py`: central paths and dataset schema.
