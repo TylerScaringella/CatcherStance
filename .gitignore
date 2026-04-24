@@ -2,7 +2,7 @@
 data/*
 .venv/*
 *.mp4
-*/__pycache__/*
+__pycache__/*
 *.json
 *.csv
 runs/*
