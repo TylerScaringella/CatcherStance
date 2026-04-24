@@ -6,6 +6,7 @@ Codex was used to generate the majority of the web interface and backend API cod
 **What it generated**:
 - Full-stack web interface for managing the AI pipeline
 - Backend API implementation
+- README's and text to better describe the purpose and structure of individual module's and folders within the project
 
 **Iterative Development**:
 Not everything was created in a single prompt, rather:
