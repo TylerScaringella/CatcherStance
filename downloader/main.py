@@ -12,10 +12,11 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 # =========================
 # CONFIG
 # =========================
+MODULE_DIR = Path(__file__).resolve().parent
 START_URL = "https://duke-ncaabaseball.trumedianetworks.com/baseball/"
-DOWNLOAD_DIR = "downloads"
-MANIFEST_PATH = "video_manifest.csv"
-STORAGE_STATE_PATH = "playwright_state.json"
+DOWNLOAD_DIR = str(MODULE_DIR / "downloads")
+MANIFEST_PATH = str(MODULE_DIR / "video_manifest.csv")
+STORAGE_STATE_PATH = str(MODULE_DIR / "playwright_state.json")
 
 # Selectors
 GRID_SELECTOR = "tmn-grid.contents-container"
@@ -86,8 +87,8 @@ def ensure_parent_dir(path: str):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
 
-def get_output_path(clip_id: str) -> str:
-    return os.path.join(DOWNLOAD_DIR, f"{clip_id}.mp4")
+def get_output_path(clip_id: str, download_dir: str = DOWNLOAD_DIR) -> str:
+    return os.path.join(download_dir, f"{clip_id}.mp4")
 
 
 def get_card_count(page) -> int:
@@ -234,19 +235,19 @@ def download_one_row(row):
 # =========================
 # CRAWL
 # =========================
-def get_logged_in_context(browser, headless=False):
+def get_logged_in_context(browser, start_url=START_URL, storage_state_path=STORAGE_STATE_PATH):
     """
     Reuse saved session if possible. If not, prompt for manual login and save it.
     """
-    if os.path.exists(STORAGE_STATE_PATH):
-        context = browser.new_context(storage_state=STORAGE_STATE_PATH, accept_downloads=False)
+    if os.path.exists(storage_state_path):
+        context = browser.new_context(storage_state=storage_state_path, accept_downloads=False)
         page = context.new_page()
-        page.goto(START_URL, wait_until="domcontentloaded")
+        page.goto(start_url, wait_until="domcontentloaded")
         return context, page, False
 
     context = browser.new_context(accept_downloads=False)
     page = context.new_page()
-    page.goto(START_URL, wait_until="domcontentloaded")
+    page.goto(start_url, wait_until="domcontentloaded")
 
     input(
         "\nNo saved Playwright session found.\n"
@@ -254,8 +255,8 @@ def get_logged_in_context(browser, headless=False):
         "then press Enter to save the session and continue..."
     )
 
-    context.storage_state(path=STORAGE_STATE_PATH)
-    print(f"Saved authenticated session to: {STORAGE_STATE_PATH}")
+    context.storage_state(path=storage_state_path)
+    print(f"Saved authenticated session to: {storage_state_path}")
     return context, page, True
 
 
@@ -265,7 +266,7 @@ def ensure_grid_loaded(page):
     page.wait_for_selector(CARD_SELECTOR, timeout=30000)
 
 
-def collect_s3_urls(page, rows, by_clip_id, by_s3_url):
+def collect_s3_urls(page, rows, by_clip_id, by_s3_url, download_dir=DOWNLOAD_DIR):
     """
     Crawl the loaded TruMedia card grid, click cards, capture S3 mp4 URLs,
     and write/update manifest rows as pending.
@@ -320,7 +321,7 @@ def collect_s3_urls(page, rows, by_clip_id, by_s3_url):
                 continue
 
             clip_id = sanitize_filename(extract_clip_id(s3_url))
-            out_path = get_output_path(clip_id)
+            out_path = get_output_path(clip_id, download_dir=download_dir)
 
             existing = by_clip_id.get(clip_id) or by_s3_url.get(s3_url)
             if existing is not None:
@@ -373,16 +374,28 @@ def collect_s3_urls(page, rows, by_clip_id, by_s3_url):
 # =========================
 # MAIN
 # =========================
-def main():
-    rows, by_clip_id, by_s3_url = load_manifest(MANIFEST_PATH)
+def run_download_pipeline(
+    start_url=START_URL,
+    download_dir=DOWNLOAD_DIR,
+    manifest_path=MANIFEST_PATH,
+    storage_state_path=STORAGE_STATE_PATH,
+    headless=False,
+    download_workers=DOWNLOAD_WORKERS,
+):
+    os.makedirs(download_dir, exist_ok=True)
+    rows, by_clip_id, by_s3_url = load_manifest(manifest_path)
     print(f"Loaded manifest rows: {len(rows)}")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        context, page, new_login = get_logged_in_context(browser)
+        browser = p.chromium.launch(headless=headless)
+        context, page, new_login = get_logged_in_context(
+            browser,
+            start_url=start_url,
+            storage_state_path=storage_state_path,
+        )
 
         if not new_login:
-            print(f"Using saved Playwright session: {STORAGE_STATE_PATH}")
+            print(f"Using saved Playwright session: {storage_state_path}")
             print(
                 "If the session is expired, log in manually in the opened browser tab,\n"
                 "then press Enter to refresh the saved state and continue."
@@ -391,14 +404,14 @@ def main():
                 ensure_grid_loaded(page)
             except Exception:
                 input("Session may be expired. Log in manually and navigate to the pitch cards page, then press Enter...")
-                context.storage_state(path=STORAGE_STATE_PATH)
-                print(f"Updated saved authenticated session: {STORAGE_STATE_PATH}")
+                context.storage_state(path=storage_state_path)
+                print(f"Updated saved authenticated session: {storage_state_path}")
                 ensure_grid_loaded(page)
 
-        collected_this_run = collect_s3_urls(page, rows, by_clip_id, by_s3_url)
-        write_manifest(MANIFEST_PATH, rows)
+        collected_this_run = collect_s3_urls(page, rows, by_clip_id, by_s3_url, download_dir=download_dir)
+        write_manifest(manifest_path, rows)
         print(f"\nCollected new URLs this run: {collected_this_run}")
-        print(f"Manifest updated: {MANIFEST_PATH}")
+        print(f"Manifest updated: {manifest_path}")
 
         browser.close()
 
@@ -418,24 +431,24 @@ def main():
             row["status"] = "pending"
             pending_rows.append(row)
 
-    write_manifest(MANIFEST_PATH, rows)
+    write_manifest(manifest_path, rows)
 
     print(f"\nAlready downloaded on disk: {already_downloaded}")
     print(f"Pending downloads: {len(pending_rows)}")
 
     if not pending_rows:
         print("Nothing to download.")
-        print(f"Files saved in: {DOWNLOAD_DIR}")
-        return
+        print(f"Files saved in: {download_dir}")
+        return rows
 
-    print(f"\nStarting parallel downloads with {DOWNLOAD_WORKERS} workers...")
+    print(f"\nStarting parallel downloads with {download_workers} workers...")
 
     completed = 0
     failed = 0
 
     row_lookup = {row["clip_id"]: row for row in rows if row.get("clip_id")}
 
-    with ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as executor:
+    with ThreadPoolExecutor(max_workers=download_workers) as executor:
         futures = {executor.submit(download_one_row, row): row for row in pending_rows}
 
         for future in as_completed(futures):
@@ -465,14 +478,40 @@ def main():
                 failed += 1
                 print(f"[FAIL] {result_clip_id} -> {err}")
 
-            write_manifest(MANIFEST_PATH, rows)
+            write_manifest(manifest_path, rows)
 
     print("\nDone.")
     print(f"Collected new URLs this run: {collected_this_run}")
     print(f"Downloaded successfully this run: {completed}")
     print(f"Failed this run: {failed}")
-    print(f"Manifest: {MANIFEST_PATH}")
-    print(f"Files saved in: {DOWNLOAD_DIR}")
+    print(f"Manifest: {manifest_path}")
+    print(f"Files saved in: {download_dir}")
+    return rows
+
+
+def parse_args():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Download pitch-by-pitch videos from TruMedia.")
+    parser.add_argument("--start-url", default=START_URL)
+    parser.add_argument("--download-dir", default=DOWNLOAD_DIR)
+    parser.add_argument("--manifest-path", default=MANIFEST_PATH)
+    parser.add_argument("--storage-state-path", default=STORAGE_STATE_PATH)
+    parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--workers", type=int, default=DOWNLOAD_WORKERS)
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    run_download_pipeline(
+        start_url=args.start_url,
+        download_dir=args.download_dir,
+        manifest_path=args.manifest_path,
+        storage_state_path=args.storage_state_path,
+        headless=args.headless,
+        download_workers=args.workers,
+    )
 
 
 if __name__ == "__main__":
