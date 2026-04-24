@@ -1,8 +1,26 @@
+# Python/runtime noise
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# OS/editor noise
 .DS_Store
-data/*
-.venv/*
+
+# Generated/downloaded project data
+data/**/*.csv
+data/**/*.json
+data/**/*.mp4
+data/downloads/
+data/runs/
+
+downloader/downloads/
+downloader/*.csv
+downloader/*.json
+
+# Large video/model artifacts that should not be added accidentally
 *.mp4
-*/__pycache__/*
-*.json
-*.csv
-runs/*
+notebook/yolo26n.pt
+
+# Keep notebooks, source files, docs, and the trained lightweight classifier artifacts tracked intentionally.

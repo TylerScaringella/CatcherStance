@@ -1,0 +1,8 @@
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+WEB_DIR = ROOT / "web"
+RUNS_DIR = ROOT / "data" / "runs"
+SCHEDULE_PATH = ROOT / "data" / "schedules" / "duke_baseball_2026.json"
+TRUMEDIA_DEFAULT_URL = "https://duke-ncaabaseball.trumedianetworks.com/baseball/"
+SCHEDULE_REFRESH_INTERVAL_SECONDS = 60 * 30
