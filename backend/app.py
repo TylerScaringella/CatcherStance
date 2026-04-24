@@ -1,3 +1,5 @@
+# Codex attribution: OpenAI Codex generated this Flask app factory module as
+# part of the backend API scaffolding, with project-specific review and edits.
 from flask import Flask
 
 from .routes import register_routes

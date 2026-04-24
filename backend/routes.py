@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# Codex attribution: OpenAI Codex generated the Flask route structure for the
+# web API, with project-specific review and edits.
 import re
 import threading
 import time

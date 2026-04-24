@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# Codex attribution: OpenAI Codex generated the schedule loading and refresh
+# support code, with project-specific review and edits.
 import json
 import re
 import threading

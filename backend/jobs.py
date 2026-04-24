@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# Codex attribution: OpenAI Codex generated the backend job-state orchestration
+# code, with project-specific review and edits.
 import csv
 import json
 import threading

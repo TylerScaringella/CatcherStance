@@ -1,3 +1,5 @@
+# Codex attribution: OpenAI Codex generated this backend configuration module
+# for the Flask web app, with project-specific review and edits.
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent

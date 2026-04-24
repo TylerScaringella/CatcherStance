@@ -1,3 +1,5 @@
+// Codex attribution: OpenAI Codex generated the browser-side web interface
+// logic, with project-specific review and edits.
 const state = {
   schedule: null,
   games: [],
