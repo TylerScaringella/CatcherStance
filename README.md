@@ -18,7 +18,7 @@ Then open `http://127.0.0.1:8000`, select a Duke Baseball game, and run the dete
 
 ## Video Links
 
-- Demo video: TODO
+- Demo video: [YouTube](https://youtu.be/RfUfbrp1tPw)
 - Technical walkthrough: TODO
 
 ## Evaluation
