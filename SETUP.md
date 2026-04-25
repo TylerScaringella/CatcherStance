@@ -9,10 +9,10 @@ These instructions set up the catcher stance detection web app, install the Pyth
 - Internet access
 - Access to TruMedia
 - The project model files:
-  - `model/catcher_stance_mlp.pt`
-  - `model/label_encoder.pkl`
-  - `model/standard_scaler.pkl`
-  - `notebook/yolo26n-pose.pt`
+  - `models/catcher_stance_mlp.pt`
+  - `models/label_encoder.pkl`
+  - `models/standard_scaler.pkl`
+  - `notebooks/yolo26n-pose.pt`
 
 ## Install
 
@@ -40,7 +40,7 @@ python -m playwright install chromium
 Start the Flask web app from the project root:
 
 ```bash
-python app.py
+python src/app.py
 ```
 
 The terminal should print:
@@ -71,16 +71,16 @@ When prompted:
 The app saves the authenticated browser session to:
 
 ```text
-downloader/playwright_state.json
+data/downloader/playwright_state.json
 ```
 
 After that file exists, future runs should reuse the saved session. If the session expires, the downloader will ask you to log in again and refresh the saved state.
 
 ## How To Use The App
 
-1. Start the app with `python app.py`.
+1. Start the app with `python src/app.py`.
 2. Open `http://127.0.0.1:8000`.
-3. Select a game from the schedule on the left.
+3. Select the included Duke at Liberty sample game from the schedule on the left.
 4. Confirm the TruMedia game or pitch-card URL in the URL field.
 5. Click `Run Detection`.
 6. Wait for the job status to move through downloading, detection, and completion.
@@ -89,6 +89,8 @@ After that file exists, future runs should reuse the saved session. If the sessi
 9. Click `Play` on a pitch row to view the video replay with the catcher pose overlay.
 
 The `Force redownload` checkbox ignores the latest completed run for that game and starts a fresh download/detection run.
+
+The repository includes a sample completed run at `data/runs/duke-2026-04-21-liberty-sample/` with five downloaded videos, `video_manifest.csv`, `detections.csv`, `detections.json`, `pitch_features.csv`, and `job.json`. Graders can inspect that run without TruMedia access. Running a fresh download still requires TruMedia access.
 
 ## Outputs
 
@@ -119,7 +121,7 @@ The main prediction fields in `detections.csv` are:
 
 If the app starts but downloads do not begin, check the terminal. The downloader may be waiting for TruMedia login confirmation.
 
-If TruMedia login keeps failing, delete `downloader/playwright_state.json`, restart the app, and log in again when the Chromium window opens.
+If TruMedia login keeps failing, delete `data/downloader/playwright_state.json`, restart the app, and log in again when the Chromium window opens.
 
 If Playwright cannot launch Chromium, rerun:
 
@@ -133,4 +135,4 @@ If imports fail, make sure the virtual environment is activated and dependencies
 pip install -r requirements.txt
 ```
 
-If model loading fails, confirm that the files in `model/` and `notebook/yolo26n-pose.pt` are present.
+If model loading fails, confirm that the files in `models/` and `notebooks/yolo26n-pose.pt` are present.

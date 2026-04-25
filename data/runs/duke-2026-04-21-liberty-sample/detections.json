@@ -1,0 +1,47 @@
+[
+  {
+    "pitch_index": "1",
+    "clip_id": "pitch-pix-69e939e0ee33ff11241e0939-356-369",
+    "video_path": "data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-356-369.mp4",
+    "stance": "Knee-down Right",
+    "confidence": "0.8602392077445984",
+    "status": "ok",
+    "error": ""
+  },
+  {
+    "pitch_index": "2",
+    "clip_id": "pitch-pix-69e939e0ee33ff11241e0939-378-388",
+    "video_path": "data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-378-388.mp4",
+    "stance": "Knee-down Right",
+    "confidence": "0.9932465553283691",
+    "status": "ok",
+    "error": ""
+  },
+  {
+    "pitch_index": "3",
+    "clip_id": "pitch-pix-69e939e0ee33ff11241e0939-395-409",
+    "video_path": "data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-395-409.mp4",
+    "stance": "Knee-down Right",
+    "confidence": "0.9904230833053589",
+    "status": "ok",
+    "error": ""
+  },
+  {
+    "pitch_index": "4",
+    "clip_id": "pitch-pix-69e939e0ee33ff11241e0939-428-444",
+    "video_path": "data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-428-444.mp4",
+    "stance": "Knee-down Right",
+    "confidence": "0.9767746329307556",
+    "status": "ok",
+    "error": ""
+  },
+  {
+    "pitch_index": "5",
+    "clip_id": "pitch-pix-69e939e0ee33ff11241e0939-449-462",
+    "video_path": "data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-449-462.mp4",
+    "stance": "Knee-down Right",
+    "confidence": "0.9872341752052307",
+    "status": "ok",
+    "error": ""
+  }
+]

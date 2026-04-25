@@ -13,14 +13,25 @@ data/**/*.csv
 data/**/*.json
 data/**/*.mp4
 data/downloads/
-data/runs/
-
-downloader/downloads/
-downloader/*.csv
-downloader/*.json
+data/downloader/
+!data/schedules/
+!data/schedules/duke_baseball_2026.json
+data/runs/*
+!data/runs/duke-2026-04-21-liberty-sample/
+!data/runs/duke-2026-04-21-liberty-sample/downloads/
+!data/runs/duke-2026-04-21-liberty-sample/video_manifest.csv
+!data/runs/duke-2026-04-21-liberty-sample/detections.csv
+!data/runs/duke-2026-04-21-liberty-sample/detections.json
+!data/runs/duke-2026-04-21-liberty-sample/pitch_features.csv
+!data/runs/duke-2026-04-21-liberty-sample/job.json
 
 # Large video/model artifacts that should not be added accidentally
 *.mp4
-notebook/yolo26n.pt
+notebooks/yolo26n.pt
+!data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-356-369.mp4
+!data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-378-388.mp4
+!data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-395-409.mp4
+!data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-428-444.mp4
+!data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-449-462.mp4
 
 # Keep notebooks, source files, docs, and the trained lightweight classifier artifacts tracked intentionally.

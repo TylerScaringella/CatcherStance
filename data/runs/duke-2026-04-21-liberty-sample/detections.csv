@@ -1,0 +1,6 @@
+pitch_index,clip_id,video_path,stance,confidence,status,error
+1,pitch-pix-69e939e0ee33ff11241e0939-356-369,data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-356-369.mp4,Knee-down Right,0.8602392077445984,ok,
+2,pitch-pix-69e939e0ee33ff11241e0939-378-388,data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-378-388.mp4,Knee-down Right,0.9932465553283691,ok,
+3,pitch-pix-69e939e0ee33ff11241e0939-395-409,data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-395-409.mp4,Knee-down Right,0.9904230833053589,ok,
+4,pitch-pix-69e939e0ee33ff11241e0939-428-444,data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-428-444.mp4,Knee-down Right,0.9767746329307556,ok,
+5,pitch-pix-69e939e0ee33ff11241e0939-449-462,data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-449-462.mp4,Knee-down Right,0.9872341752052307,ok,

@@ -1,2 +1,0 @@
-"""TruMedia video downloader package."""
-

@@ -1,0 +1,113 @@
+<!doctype html>
+<!-- Codex attribution: OpenAI Codex generated this web interface markup, with
+     project-specific review and edits. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Catcher Stance Detection</title>
+    <link rel="stylesheet" href="/styles.css?v=mobile-scroll-2">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="topbar">
+        <div>
+          <h1>Catcher Stance Detection</h1>
+          <p id="scheduleMeta">Loading schedule...</p>
+        </div>
+        <div class="filters">
+          <input id="search" type="search" placeholder="Search opponent or location">
+          <select id="statusFilter">
+            <option value="all">All games</option>
+            <option value="complete">Completed</option>
+            <option value="future">Upcoming</option>
+            <option value="conference">ACC</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <aside class="game-list" id="gameList" aria-label="Game schedule"></aside>
+
+        <section class="panel">
+          <div class="game-header">
+            <div>
+              <h2 id="gameTitle">Select a game</h2>
+              <p id="gameDetails">Choose a schedule entry, confirm the TruMedia URL, then run detection.</p>
+            </div>
+            <button id="runBtn" disabled>Run Detection</button>
+          </div>
+
+          <label class="url-field">
+            TruMedia game or pitch-card URL
+            <input id="trumediaUrl" type="url" placeholder="https://duke-ncaabaseball.trumedianetworks.com/baseball/">
+          </label>
+
+          <label class="option-row">
+            <input id="forceRedownload" type="checkbox">
+            <span>Force redownload</span>
+          </label>
+
+          <div class="job-strip">
+            <div class="job-copy">
+              <span id="jobStatus">Idle</span>
+              <span id="jobMessage"></span>
+            </div>
+            <div class="progress" aria-label="Job progress">
+              <div id="progressBar"></div>
+            </div>
+          </div>
+
+          <div class="actions">
+            <a id="jsonExport" class="button secondary disabled" href="#">Export JSON</a>
+            <a id="csvExport" class="button secondary disabled" href="#">Export CSV</a>
+          </div>
+
+          <div class="mobile-results" id="mobileResults">
+            <div class="empty">No detections yet.</div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Pitch</th>
+                  <th>Clip</th>
+                  <th>Stance</th>
+                  <th>Confidence</th>
+                  <th>Status</th>
+                  <th>Replay</th>
+                </tr>
+              </thead>
+              <tbody id="resultsBody">
+                <tr><td colspan="6" class="empty">No detections yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="replayDialog" class="replay-dialog">
+      <div class="replay-header">
+        <div>
+          <h2 id="replayTitle">Pitch Replay</h2>
+          <p id="replayMeta"></p>
+        </div>
+        <button id="closeReplay" type="button" aria-label="Close replay">Close</button>
+      </div>
+      <div class="replay-frame">
+        <img id="overlayStream" alt="Live catcher skeleton overlay">
+      </div>
+    </dialog>
+
+    <script>
+      window.CATCHER_APP_CONFIG = {
+        // Leave blank to use the current website origin, which is what you want
+        // when Flask is served through a Cloudflare Tunnel.
+        apiBaseUrl: "",
+      };
+    </script>
+    <script src="/app.js?v=mobile-scroll-2"></script>
+  </body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "team": "Duke",
+  "sport": "Baseball",
+  "season": 2026,
+  "sample": true,
+  "games": [
+    {
+      "id": "duke-2026-04-21-liberty",
+      "date": "2026-04-21",
+      "opponent": "at Liberty",
+      "location": "Lynchburg, Va.",
+      "conference": false,
+      "result": "L 10-13",
+      "trumedia_url": ""
+    }
+  ]
+}
