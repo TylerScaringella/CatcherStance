@@ -43,7 +43,3 @@ For comparison, I also tested a simple logistic regression baseline on the same 
 | MLP Classifier | 85.3% | 0.87 | 0.85 | 0.86 |
 
 The MLP substantially outperformed the logistic regression baseline, especially in overall accuracy and weighted F1-score. The model performed best on `Knee-down Right`, which was also the most common class in the dataset. `Squat` performance is not reliable yet because there were only two squat examples in the test set.
-
-## Individual Contributions
-
-This was an individual project by Tyler Scaringella. I designed the pipeline, built the downloader, curated the labeled dataset, trained and evaluated the stance classifier, implemented catcher detection and pose feature extraction, and created the Flask web app for running and reviewing detections.
