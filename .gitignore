@@ -34,4 +34,7 @@ notebooks/yolo26n.pt
 !data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-428-444.mp4
 !data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-449-462.mp4
 
+# Image files
+*.jpg
+
 # Keep notebooks, source files, docs, and the trained lightweight classifier artifacts tracked intentionally.
