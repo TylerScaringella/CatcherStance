@@ -9,29 +9,32 @@ venv/
 .DS_Store
 
 # Generated/downloaded project data
-data/**/*.csv
-data/**/*.json
-data/**/*.mp4
-data/downloads/
-data/downloader/
+data/auth/
+data/raw/downloads/
+data/processed/
+data/runs/
+*.mp4
+data/examples/*
+!data/examples/duke-2026-04-21-liberty-sample/
+!data/examples/duke-2026-04-21-liberty-sample/downloads/
+!data/examples/duke-2026-04-21-liberty-sample/video_manifest.csv
+!data/examples/duke-2026-04-21-liberty-sample/detections.csv
+!data/examples/duke-2026-04-21-liberty-sample/detections.json
+!data/examples/duke-2026-04-21-liberty-sample/pitch_features.csv
+!data/examples/duke-2026-04-21-liberty-sample/job.json
+!data/examples/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-356-369.mp4
+!data/examples/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-378-388.mp4
+!data/examples/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-395-409.mp4
+!data/examples/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-428-444.mp4
+!data/examples/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-449-462.mp4
+
+# Schedule and source data that should remain checked in intentionally
 !data/schedules/
 !data/schedules/duke_baseball_2026.json
-data/runs/*
-!data/runs/duke-2026-04-21-liberty-sample/
-!data/runs/duke-2026-04-21-liberty-sample/downloads/
-!data/runs/duke-2026-04-21-liberty-sample/video_manifest.csv
-!data/runs/duke-2026-04-21-liberty-sample/detections.csv
-!data/runs/duke-2026-04-21-liberty-sample/detections.json
-!data/runs/duke-2026-04-21-liberty-sample/pitch_features.csv
-!data/runs/duke-2026-04-21-liberty-sample/job.json
+!data/raw/labeled_videos/
+!data/raw/labeled_videos/labeled-videos-2026-04-22-00-05-e3d836a2.csv
 
-# Large video/model artifacts that should not be added accidentally
-*.mp4
-notebooks/yolo26n.pt
-!data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-356-369.mp4
-!data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-378-388.mp4
-!data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-395-409.mp4
-!data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-428-444.mp4
-!data/runs/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-449-462.mp4
+# Image files
+*.jpg
 
 # Keep notebooks, source files, docs, and the trained lightweight classifier artifacts tracked intentionally.

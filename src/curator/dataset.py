@@ -13,8 +13,8 @@ from .config import (
     DESIRED_COLUMNS,
     LABELED_VIDEO_PATH,
     MODEL_PATH,
-    PROJECT_ROOT,
 )
+from project_paths import RAW_DOWNLOADS_DIR
 from .features import init_worker, process_video
 
 filtered_videos = None
@@ -31,7 +31,7 @@ def load_filtered_videos():
 
         filtered_video = {k: v for k, v in video.items() if k in DESIRED_COLUMNS}
         video_file_name = video["video"].replace("/data/local-files/?d=downloads/", "")
-        filtered_video["video"] = str(PROJECT_ROOT / "data" / "downloader" / "downloads" / video_file_name)
+        filtered_video["video"] = str(RAW_DOWNLOADS_DIR / video_file_name)
         filtered.append(filtered_video)
 
     return filtered

@@ -16,7 +16,19 @@ python src/app.py
 
 Then open `http://127.0.0.1:8000`, select a Duke Baseball game, and run the detection pipeline. The app downloads available pitch videos, processes each clip through catcher detection and stance classification, and writes results to `data/runs/<run-id>/detections.csv`, `detections.json`, `pitch_features.csv`, and `video_manifest.csv`.
 
-The repository includes a five-pitch sample run from Duke at Liberty on April 21, 2026 in `data/runs/duke-2026-04-21-liberty-sample/`. This lets graders inspect videos, manifests, and stance predictions without TruMedia access.
+The repository includes a five-pitch sample run from Duke at Liberty on April 21, 2026 in `data/examples/duke-2026-04-21-liberty-sample/`. This lets graders inspect videos, manifests, and stance predictions without TruMedia access.
+
+## Repository Layout
+
+- `src/`: Flask app, downloader, curator, pose pipeline, and catcher detection code
+- `data/auth/`: saved Playwright session state
+- `data/raw/`: source inputs and downloaded clip media
+- `data/processed/`: generated datasets and derived training files
+- `data/runs/`: active app output for new detection runs
+- `data/examples/`: checked-in sample outputs for review and grading
+- `models/classifier/`: trained stance classifier artifacts
+- `models/pose/`: pose model weights used by the curator and overlay code
+- `research/`: notebooks and exploratory analysis
 
 ## Video Links
 

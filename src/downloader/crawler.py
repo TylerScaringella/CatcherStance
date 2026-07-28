@@ -97,6 +97,7 @@ def get_logged_in_context(browser, start_url=START_URL, storage_state_path=STORA
     context = browser.new_context(accept_downloads=False)
     page = context.new_page()
     page.goto(start_url, wait_until="domcontentloaded")
+    Path(storage_state_path).parent.mkdir(parents=True, exist_ok=True)
 
     input(
         "\nNo saved Playwright session found.\n"
