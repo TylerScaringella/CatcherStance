@@ -1,0 +1,196 @@
+[
+  {
+    "video": "pitch-pix-69e939e0ee33ff11241e0939-356-369.mp4",
+    "path": "data/examples/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-356-369.mp4",
+    "fps": 59.928,
+    "frames": 817,
+    "duration_s": 13.633,
+    "vid_stride": 2,
+    "sampled_frames": 390,
+    "valid_detections": 126,
+    "abstentions": 264,
+    "first_valid_frame": 214,
+    "last_valid_frame": 364,
+    "max_gap_in_valid_frames": 4,
+    "median_valid_motion": 2.207,
+    "frame_gate_reasons": {
+      "abstain": 264,
+      "ok": 126
+    },
+    "candidate_rejection_reasons": {
+      "pitcher_like_low_tall_geometry": 116,
+      "stance_too_narrow": 77,
+      "invalid_zone": 114,
+      "hips_too_far_from_anchor": 70,
+      "knees_too_straight": 47,
+      "not_low_enough": 3,
+      "too_tall_and_low_for_catcher": 1,
+      "bad_aspect_ratio": 4
+    },
+    "best_window": {
+      "start_frame": 214,
+      "end_frame": 264,
+      "window_frames": 45,
+      "mean_center_delta": 2.2139704948345265,
+      "std_center_delta": 1.455623037551992,
+      "area_norm": 0.03120580856220433,
+      "mean_score": 0.7946515774845617,
+      "mean_anchor_dist_norm": 0.28569912828284183,
+      "motion_score": 3.5418690254518106
+    }
+  },
+  {
+    "video": "pitch-pix-69e939e0ee33ff11241e0939-378-388.mp4",
+    "path": "data/examples/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-378-388.mp4",
+    "fps": 59.906,
+    "frames": 635,
+    "duration_s": 10.6,
+    "vid_stride": 2,
+    "sampled_frames": 299,
+    "valid_detections": 79,
+    "abstentions": 220,
+    "first_valid_frame": 137,
+    "last_valid_frame": 262,
+    "max_gap_in_valid_frames": 11,
+    "median_valid_motion": 3.153,
+    "frame_gate_reasons": {
+      "abstain": 220,
+      "ok": 79
+    },
+    "candidate_rejection_reasons": {
+      "pitcher_like_low_tall_geometry": 68,
+      "stance_too_narrow": 39,
+      "hips_too_far_from_anchor": 71,
+      "knees_too_straight": 13,
+      "too_tall_and_low_for_catcher": 1
+    },
+    "best_window": {
+      "start_frame": 145,
+      "end_frame": 223,
+      "window_frames": 45,
+      "mean_center_delta": 3.951873264632671,
+      "std_center_delta": 4.192595443158719,
+      "area_norm": 0.12171240022928687,
+      "mean_score": 0.7958943842501921,
+      "mean_anchor_dist_norm": 0.26775911102212663,
+      "motion_score": 8.107002231170638
+    }
+  },
+  {
+    "video": "pitch-pix-69e939e0ee33ff11241e0939-395-409.mp4",
+    "path": "data/examples/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-395-409.mp4",
+    "fps": 59.933,
+    "frames": 874,
+    "duration_s": 14.583,
+    "vid_stride": 2,
+    "sampled_frames": 419,
+    "valid_detections": 99,
+    "abstentions": 320,
+    "first_valid_frame": 204,
+    "last_valid_frame": 353,
+    "max_gap_in_valid_frames": 13,
+    "median_valid_motion": 5.138,
+    "frame_gate_reasons": {
+      "abstain": 320,
+      "ok": 99
+    },
+    "candidate_rejection_reasons": {
+      "pitcher_like_low_tall_geometry": 88,
+      "stance_too_narrow": 81,
+      "hips_too_far_from_anchor": 39,
+      "knees_too_straight": 32,
+      "too_tall_and_low_for_catcher": 2
+    },
+    "best_window": {
+      "start_frame": 204,
+      "end_frame": 255,
+      "window_frames": 45,
+      "mean_center_delta": 4.786470512348449,
+      "std_center_delta": 3.0070887575400573,
+      "area_norm": 0.05208358988095615,
+      "mean_score": 0.808038899124285,
+      "mean_anchor_dist_norm": 0.2837502797864535,
+      "motion_score": 7.684035079944605
+    }
+  },
+  {
+    "video": "pitch-pix-69e939e0ee33ff11241e0939-428-444.mp4",
+    "path": "data/examples/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-428-444.mp4",
+    "fps": 59.94,
+    "frames": 992,
+    "duration_s": 16.55,
+    "vid_stride": 2,
+    "sampled_frames": 479,
+    "valid_detections": 245,
+    "abstentions": 234,
+    "first_valid_frame": 95,
+    "last_valid_frame": 396,
+    "max_gap_in_valid_frames": 13,
+    "median_valid_motion": 2.823,
+    "frame_gate_reasons": {
+      "abstain": 234,
+      "ok": 245
+    },
+    "candidate_rejection_reasons": {
+      "pitcher_like_low_tall_geometry": 241,
+      "stance_too_narrow": 193,
+      "knees_too_straight": 69,
+      "mostly_invalid_zone": 1,
+      "too_far_from_search_region": 5,
+      "hips_too_far_from_anchor": 60,
+      "not_low_enough": 1,
+      "invalid_zone": 17,
+      "legs_too_straight": 4,
+      "bad_aspect_ratio": 4
+    },
+    "best_window": {
+      "start_frame": 163,
+      "end_frame": 211,
+      "window_frames": 45,
+      "mean_center_delta": 2.150873813684111,
+      "std_center_delta": 1.174033447130459,
+      "area_norm": 0.037610165734581674,
+      "mean_score": 0.8229709181894069,
+      "mean_anchor_dist_norm": 0.27380602226759604,
+      "motion_score": 3.19792324291127
+    }
+  },
+  {
+    "video": "pitch-pix-69e939e0ee33ff11241e0939-449-462.mp4",
+    "path": "data/examples/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-449-462.mp4",
+    "fps": 59.928,
+    "frames": 811,
+    "duration_s": 13.533,
+    "vid_stride": 2,
+    "sampled_frames": 389,
+    "valid_detections": 242,
+    "abstentions": 147,
+    "first_valid_frame": 0,
+    "last_valid_frame": 339,
+    "max_gap_in_valid_frames": 34,
+    "median_valid_motion": 2.763,
+    "frame_gate_reasons": {
+      "ok": 242,
+      "abstain": 147
+    },
+    "candidate_rejection_reasons": {
+      "pitcher_like_low_tall_geometry": 121,
+      "too_far_from_search_region": 147,
+      "knees_too_straight": 107,
+      "hips_too_far_from_anchor": 39,
+      "stance_too_narrow": 97,
+      "not_low_enough": 1
+    },
+    "best_window": {
+      "start_frame": 226,
+      "end_frame": 270,
+      "window_frames": 45,
+      "mean_center_delta": 2.126868922965046,
+      "std_center_delta": 1.1794519583807963,
+      "area_norm": 0.021122303383274796,
+      "mean_score": 0.851054412550176,
+      "mean_anchor_dist_norm": 0.2618804974701071,
+      "motion_score": 3.157232302219082
+    }
+  }
+]
