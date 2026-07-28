@@ -1,11 +1,9 @@
-from pathlib import Path
+from project_paths import AUTH_DIR, RAW_DOWNLOADS_DIR
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = PROJECT_ROOT / "data" / "downloader"
 START_URL = "https://duke-ncaabaseball.trumedianetworks.com/baseball/"
-DOWNLOAD_DIR = str(DATA_DIR / "downloads")
-MANIFEST_PATH = str(DATA_DIR / "video_manifest.csv")
-STORAGE_STATE_PATH = str(DATA_DIR / "playwright_state.json")
+DOWNLOAD_DIR = str(RAW_DOWNLOADS_DIR)
+MANIFEST_PATH = str(RAW_DOWNLOADS_DIR / "video_manifest.csv")
+STORAGE_STATE_PATH = str(AUTH_DIR / "playwright_state.json")
 
 GRID_SELECTOR = "tmn-grid.contents-container"
 VIEWPORT_SELECTOR = "tmn-grid.contents-container .viewport"

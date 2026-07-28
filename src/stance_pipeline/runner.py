@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from .config import PROJECT_ROOT, RUNS_DIR, StatusCallback
+from .config import RUNS_DIR, StatusCallback
 from .detect import detect_stances_for_manifest, write_detection_outputs
+from project_paths import PLAYWRIGHT_STATE_PATH
 from downloader.main import run_download_pipeline
 
 
@@ -15,7 +16,7 @@ def run_game_detection(
     run_dir = RUNS_DIR / run_id
     download_dir = run_dir / "downloads"
     manifest_path = run_dir / "video_manifest.csv"
-    storage_state_path = PROJECT_ROOT / "data" / "downloader" / "playwright_state.json"
+    storage_state_path = PLAYWRIGHT_STATE_PATH
 
     run_download_pipeline(
         start_url=start_url,

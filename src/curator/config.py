@@ -1,9 +1,8 @@
-from pathlib import Path
+from project_paths import POSE_MODEL_PATH, PROCESSED_DATASET_DIR, RAW_LABELED_VIDEOS_DIR
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-LABELED_VIDEO_PATH = PROJECT_ROOT / "data/labeled_videos/labeled-videos-2026-04-22-00-05-e3d836a2.csv"
-DATASET_OUTPUT_PATH = PROJECT_ROOT / "data/dataset/keypoints-labeled.csv"
-MODEL_PATH = PROJECT_ROOT / "notebooks/yolo26n-pose.pt"
+LABELED_VIDEO_PATH = RAW_LABELED_VIDEOS_DIR / "labeled-videos-2026-04-22-00-05-e3d836a2.csv"
+DATASET_OUTPUT_PATH = PROCESSED_DATASET_DIR / "keypoints-labeled.csv"
+MODEL_PATH = POSE_MODEL_PATH
 
 DESIRED_COLUMNS = ["id", "choice", "video"]
 NUM_FRAMES = 7
