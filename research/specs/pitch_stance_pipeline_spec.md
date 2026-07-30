@@ -6,6 +6,8 @@ Build a frame-by-frame pipeline that turns each pitch clip into one pitch-level 
 `Squat`, `LKD`, or `RKD`.
 
 The pipeline should treat the clip as a short temporal sequence, not as a single-image classification task.
+The default implementation should keep the current catcher detector as the spatial gate, then layer
+on event anchoring or low-motion windowing before any frame-level stance classification.
 
 ## Public Interface
 
@@ -26,12 +28,19 @@ The pipeline should treat the clip as a short temporal sequence, not as a single
 2. Run catcher detection on every frame with the existing plate-anchor ROI and invalid-zone filters.
 3. Collect only frames that pass the catcher gate.
 4. Determine the set-stance window:
-   - prefer an external event anchor if ball/glove tracking is available
+   - prefer a ball or glove event anchor when BaseballCV is available
    - otherwise score sliding windows and choose the lowest-motion stable segment
 5. Normalize pose coordinates by torso or box scale.
 6. Predict a frame-level stance label from keypoint geometry or a lightweight classifier.
 7. Aggregate the frame labels with majority vote or rolling median.
-8. Return the pitch-level label with quality metadata.
+8. Return the pitch-level label with quality metadata and a confidence/abstain path.
+
+## Optional Integrations
+
+- BaseballCV `ball_tracking.pt` and `glove_tracking.pt` are the preferred event-anchor candidates when available.
+- BaseballCV `pitcher_hitter_catcher.pt` is a useful coarse triage detector, but it should not replace pose-based catcher gating.
+- BaseballCV `rfdetr_glove_tracking` is a promising higher-accuracy alternative for glove/plate/rubber detection when RF-DETR is installed.
+- These integrations should remain optional so the pipeline still runs with the current local code and sample clips.
 
 ## Pseudocode
 
@@ -61,7 +70,7 @@ function analyze_pitch_clip(video):
         return reject("no_stable_catcher_window")
 
     if event_anchor_available:
-        window = anchor_window(contact_or_release_frame, pre_seconds=1.5)
+        window = anchor_window(contact_or_release_frame, pre_seconds=1.0 to 1.5)
     else:
         window = choose_low_motion_window(candidates, window_seconds=1.5)
 
@@ -81,6 +90,6 @@ function analyze_pitch_clip(video):
 
 ## Notes From Sample Exploration
 
-- BaseballCV / RF-DETR utilities are not installed in this repo environment, so they should be treated as optional integrations rather than hard dependencies.
+- BaseballCV / RF-DETR utilities are not installed in this repo environment, so they should be treated as optional integrations rather than hard dependencies unless explicitly installed.
 - The current detector already does useful disambiguation with anchor distance, invalid zones, and lower-body geometry.
 - The measured sample clips show a stable low-motion window later in the clip, which supports a hybrid windowing strategy.

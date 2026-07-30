@@ -21,6 +21,38 @@ except Exception:  # pragma: no cover - optional dependency
     BASEBALLCV_AVAILABLE = False
 
 
+OPTION_MATRIX = [
+    {
+        "path": "Current detector + low-motion window",
+        "role": "works now",
+        "use_when": "baseline production path and notebook exploration",
+        "pros": "already installed, strong catcher rejection, no extra dependency",
+        "cons": "no explicit event anchor, still relies on clip-local motion heuristics",
+    },
+    {
+        "path": "BaseballCV ball_tracking.pt / glove_tracking.pt",
+        "role": "event anchoring",
+        "use_when": "ball or glove timing can anchor release / contact",
+        "pros": "gives a physical event to look backward from",
+        "cons": "needs BaseballCV installed and benchmarked on broadcast footage",
+    },
+    {
+        "path": "BaseballCV pitcher_hitter_catcher.pt",
+        "role": "coarse candidate generation",
+        "use_when": "you want an external person detector before pose gating",
+        "pros": "simple pitcher/hitter/catcher triage",
+        "cons": "does not solve set-stance timing by itself",
+    },
+    {
+        "path": "RF-DETR rfdetr_glove_tracking",
+        "role": "higher-accuracy broadcast detection",
+        "use_when": "you can install RF-DETR and want a stronger glove/plate anchor",
+        "pros": "promising accuracy-focused alternative",
+        "cons": "extra dependency path and more integration work",
+    },
+]
+
+
 def clip_metadata(video_path: Path) -> dict:
     cap = cv2.VideoCapture(str(video_path))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
@@ -219,6 +251,10 @@ def event_anchor_window(anchor_frame_idx: int, fps: float, pre_seconds: float = 
         "pre_seconds": pre_seconds,
         "post_seconds": post_seconds,
     }
+
+
+def option_matrix() -> list[dict]:
+    return OPTION_MATRIX[:]
 
 
 def main() -> int:
