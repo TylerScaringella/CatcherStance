@@ -29,6 +29,24 @@ The staged analyzer identifies the catcher and pitch impact first, then classifi
 the stationary pre-impact set stance. `LKD` and `RKD` refer to the catcher's anatomical side.
 External weights are cached under the ignored `models/external/` directory.
 
+Run the fast unit and contract tests:
+
+```bash
+PYTHONPATH=src ./.venv/bin/python -m unittest discover -s tests -v
+```
+
+After downloading the BaseballCV assets, run the five-clip model regression:
+
+```bash
+python src/download_models.py all
+RUN_SAMPLE_MODEL_TESTS=1 CATCHER_STANCE_DEVICE=mps \
+  PYTHONPATH=src ./.venv/bin/python -m unittest discover -s tests -v
+```
+
+`CATCHER_STANCE_DEVICE=mps` is optional and specific to Apple Silicon. Omit it to
+let Ultralytics choose the available device. Custom model locations can be provided
+with `CATCHER_STANCE_PHC_MODEL` and `CATCHER_STANCE_EVENT_MODEL`.
+
 ## Repository Layout
 
 - `src/`: Flask app, downloader, curator, pose pipeline, and catcher detection code

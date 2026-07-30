@@ -11,7 +11,7 @@ import numpy as np
 
 from project_paths import CLASSIFIER_METADATA_PATH
 from stance_pipeline.analyzer import PitchStanceConfig, RollingMLPClassifier, YOLOCatcherPoseExtractor
-from stance_pipeline.assets import MODEL_ASSETS
+from stance_pipeline.assets import MODEL_ASSETS, resolve_model_asset
 from stance_pipeline.model import StanceClassifier
 from stance_pipeline.schemas import PitchStanceResult
 
@@ -129,7 +129,7 @@ class PipelineContractTests(unittest.TestCase):
 
 @unittest.skipUnless(
     os.environ.get("RUN_SAMPLE_MODEL_TESTS") == "1",
-    "Set RUN_SAMPLE_MODEL_TESTS=1 and external model paths to run model regression.",
+    "Set RUN_SAMPLE_MODEL_TESTS=1 to run the model-backed sample regression.",
 )
 class SampleModelRegressionTests(unittest.TestCase):
     def test_five_sample_clips(self):
@@ -139,9 +139,17 @@ class SampleModelRegressionTests(unittest.TestCase):
         )
         from stance_pipeline import PitchStanceConfig
 
+        phc_model = resolve_model_asset("baseballcv_phc")
+        event_model = resolve_model_asset("baseballcv_glove")
+        if phc_model is None or event_model is None:
+            self.fail(
+                "BaseballCV model assets are missing. Run "
+                "`python src/download_models.py all` before enabling "
+                "RUN_SAMPLE_MODEL_TESTS."
+            )
         config = PitchStanceConfig(
-            phc_model_path=Path(os.environ["CATCHER_STANCE_PHC_MODEL"]),
-            event_model_path=Path(os.environ["CATCHER_STANCE_EVENT_MODEL"]),
+            phc_model_path=phc_model,
+            event_model_path=event_model,
             device=os.environ.get("CATCHER_STANCE_DEVICE"),
         )
         video_dir = Path("data/examples/duke-2026-04-21-liberty-sample/downloads")
