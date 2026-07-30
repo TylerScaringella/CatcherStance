@@ -8,11 +8,9 @@ from typing import Iterable
 
 from tqdm import tqdm
 
-from curator.features import process_video
+from .analyzer import PitchStanceConfig, analyze_pitch_clip
 from .config import StatusCallback
-from .model import StanceClassifier
 from .schemas import PitchDetection, PitchFeature
-from .yolo import load_yolo_once
 
 
 def read_manifest_rows(manifest_path: Path) -> list[dict]:
@@ -35,12 +33,11 @@ def detect_stances_for_manifest(
     manifest_path: Path,
     status_callback: StatusCallback | None = None,
 ) -> tuple[list[PitchDetection], list[PitchFeature]]:
-    load_yolo_once()
-    classifier = StanceClassifier()
     detections: list[PitchDetection] = []
     feature_rows: list[PitchFeature] = []
     video_rows = downloaded_video_rows(manifest_path)
     total = len(video_rows)
+    pipeline_config = PitchStanceConfig()
 
     if status_callback is not None:
         status_callback("Running catcher detection and stance classifier", 0, total)
@@ -50,15 +47,39 @@ def detect_stances_for_manifest(
         clip_id = row.get("clip_id") or Path(row.get("saved_path", "")).stem
         video_path = row.get("saved_path", "")
         try:
-            features = process_video(video_path)
-            if features is None:
-                feature_rows.append(PitchFeature("", clip_id, "", "no_valid_catcher"))
-                detections.append(PitchDetection(idx, clip_id, video_path, "", 0.0, "no_valid_catcher"))
-                continue
-
-            feature_rows.append(PitchFeature("", clip_id, features.tolist(), "ok"))
-            stance, confidence = classifier.predict(features)
-            detections.append(PitchDetection(idx, clip_id, video_path, stance, confidence, "ok"))
+            result = analyze_pitch_clip(video_path, config=pipeline_config)
+            status = "ok" if result.accepted else result.rejection_reason or "rejected"
+            features = (
+                result.feature_vector.tolist()
+                if result.feature_vector is not None
+                else ""
+            )
+            feature_rows.append(PitchFeature("", clip_id, features, status))
+            detections.append(
+                PitchDetection(
+                    pitch_index=idx,
+                    clip_id=clip_id,
+                    video_path=video_path,
+                    stance=result.label or "",
+                    confidence=result.confidence,
+                    status=status,
+                    impact_frame=result.impact_frame if result.impact_frame is not None else "",
+                    window_start_frame=(
+                        result.window_start_frame
+                        if result.window_start_frame is not None
+                        else ""
+                    ),
+                    window_end_frame=(
+                        result.window_end_frame
+                        if result.window_end_frame is not None
+                        else ""
+                    ),
+                    valid_frame_count=result.valid_frame_count,
+                    vote_distribution=json.dumps(result.vote_distribution, sort_keys=True),
+                    detector_provenance=",".join(result.detector_provenance),
+                    quality_flags=",".join(result.quality_flags),
+                )
+            )
         except Exception as exc:
             feature_rows.append(PitchFeature("", clip_id, "", f"error:{type(exc).__name__}"))
             detections.append(

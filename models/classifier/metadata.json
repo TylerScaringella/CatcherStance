@@ -1,0 +1,22 @@
+{
+  "artifact_version": 1,
+  "feature_schema": "coco17_xy_torso_normalized_7_frames",
+  "feature_count": 238,
+  "sequence_frames": 7,
+  "class_order": [
+    "Knee-down Left",
+    "Knee-down Right",
+    "Squat"
+  ],
+  "label_semantics": {
+    "left_right": "catcher_anatomical_side"
+  },
+  "training_runtime": {
+    "scikit_learn": "1.6.1"
+  },
+  "known_limitations": [
+    "Class imbalance favors Knee-down Right.",
+    "Squat has insufficient held-out support.",
+    "The classifier must only receive pre-impact set-stance frames."
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "environment": {
+    "device": "Apple MPS",
+    "phc_model": "BaseballCV pitcher_hitter_catcher_detector_v3",
+    "event_model": "BaseballCV glove_tracking_v4_YOLOv11",
+    "pose_model": "yolo26n-pose",
+    "classifier": "catcher_stance_mlp"
+  },
+  "summary": {
+    "clips": 5,
+    "accepted": 5,
+    "label_matches": 5,
+    "anchors_within_350ms": 5,
+    "maximum_anchor_error_seconds": 0.086,
+    "total_elapsed_seconds": 173.643
+  },
+  "results": [
+    {
+      "clip_suffix": "356-369",
+      "expected_label": "LKD",
+      "predicted_label": "LKD",
+      "impact_seconds": 10.830,
+      "impact_error_seconds": 0.070,
+      "set_window_frames": [586, 622],
+      "valid_pose_frames": 19,
+      "confidence": 0.975
+    },
+    {
+      "clip_suffix": "378-388",
+      "expected_label": "LKD",
+      "predicted_label": "LKD",
+      "impact_seconds": 7.746,
+      "impact_error_seconds": 0.066,
+      "set_window_frames": [409, 437],
+      "valid_pose_frames": 15,
+      "confidence": 0.903,
+      "quality_flags": ["reduced_batch_pose_retry", "short_set_window"]
+    },
+    {
+      "clip_suffix": "395-409",
+      "expected_label": "RKD",
+      "predicted_label": "RKD",
+      "impact_seconds": 10.829,
+      "impact_error_seconds": 0.069,
+      "set_window_frames": [586, 622],
+      "valid_pose_frames": 19,
+      "confidence": 0.957
+    },
+    {
+      "clip_suffix": "428-444",
+      "expected_label": "LKD",
+      "predicted_label": "LKD",
+      "impact_seconds": 12.079,
+      "impact_error_seconds": 0.069,
+      "set_window_frames": [623, 659],
+      "valid_pose_frames": 18,
+      "confidence": 0.997
+    },
+    {
+      "clip_suffix": "449-462",
+      "expected_label": "LKD",
+      "predicted_label": "LKD",
+      "impact_seconds": 10.096,
+      "impact_error_seconds": 0.086,
+      "set_window_frames": [528, 576],
+      "valid_pose_frames": 21,
+      "confidence": 0.989
+    }
+  ]
+}

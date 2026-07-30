@@ -8,3 +8,10 @@ The notebooks are kept for transparency and development history, not as the main
 
 Current notebooks:
 - `exploratory_pitch_stance_pipeline.ipynb`: frame-windowing, catcher filtering, stance aggregation, and camera-quality exploration for pitch clips.
+
+Reproducible command-line research lives in `research/scripts/`. The staged five-clip
+benchmark can be regenerated after downloading the optional BaseballCV assets:
+
+```bash
+PYTHONPATH=src python research/scripts/benchmark_staged_pipeline.py
+```

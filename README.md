@@ -18,6 +18,17 @@ Then open `http://127.0.0.1:8000`, select a Duke Baseball game, and run the dete
 
 The repository includes a five-pitch sample run from Duke at Liberty on April 21, 2026 in `data/examples/duke-2026-04-21-liberty-sample/`. This lets graders inspect videos, manifests, and stance predictions without TruMedia access.
 
+For the accuracy-first detector, download the optional BaseballCV pitcher/hitter/catcher
+and glove/ball models:
+
+```bash
+python src/download_models.py all
+```
+
+The staged analyzer identifies the catcher and pitch impact first, then classifies only
+the stationary pre-impact set stance. `LKD` and `RKD` refer to the catcher's anatomical side.
+External weights are cached under the ignored `models/external/` directory.
+
 ## Repository Layout
 
 - `src/`: Flask app, downloader, curator, pose pipeline, and catcher detection code
@@ -28,6 +39,7 @@ The repository includes a five-pitch sample run from Duke at Liberty on April 21
 - `data/examples/`: checked-in sample outputs for review and grading
 - `models/classifier/`: trained stance classifier artifacts
 - `models/pose/`: pose model weights used by the curator and overlay code
+- `models/external/`: ignored cache for optional third-party detection weights
 - `research/`: notebooks and exploratory analysis
 
 ## Video Links

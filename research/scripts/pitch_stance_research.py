@@ -11,7 +11,9 @@ import cv2
 import numpy as np
 
 from catcher_detection import detect_catcher_from_res_item
-from curator.features import load_yolo_once
+from curator.features import cfg, load_yolo_once
+from stance_pipeline.assets import resolve_model_asset
+from stance_pipeline.temporal import contiguous_groups
 
 try:
     import baseballcv  # type: ignore  # noqa: F401
@@ -19,6 +21,11 @@ try:
     BASEBALLCV_AVAILABLE = True
 except Exception:  # pragma: no cover - optional dependency
     BASEBALLCV_AVAILABLE = False
+
+BASEBALLCV_AVAILABLE = BASEBALLCV_AVAILABLE or any(
+    resolve_model_asset(name) is not None
+    for name in ("baseballcv_phc", "baseballcv_glove")
+)
 
 
 OPTION_MATRIX = [
@@ -70,54 +77,62 @@ def clip_metadata(video_path: Path) -> dict:
 
 def load_frame_rows(video_path: Path, vid_stride: int = 2) -> list[dict]:
     model = load_yolo_once()
-    results = model(
-        str(video_path),
-        show=False,
-        stream=True,
-        save=False,
-        verbose=False,
-        imgsz=512,
-        vid_stride=vid_stride,
-    )
+    capture = cv2.VideoCapture(str(video_path))
+    frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    samples = []
+    for frame_idx in range(frame_count):
+        ok, frame = capture.read()
+        if not ok:
+            break
+        if frame_idx % vid_stride == 0:
+            samples.append((frame_idx, frame))
+    capture.release()
 
     rows: list[dict] = []
-    for frame_idx, result in enumerate(results):
-        detection = detect_catcher_from_res_item(result)
-        if detection is None:
+    for start in range(0, len(samples), 16):
+        batch = samples[start : start + 16]
+        results = model.predict(
+            [frame for _, frame in batch],
+            verbose=False,
+            imgsz=512,
+        )
+        for (frame_idx, _), result in zip(batch, results):
+            detection = detect_catcher_from_res_item(result, cfg=cfg)
+            if detection is None:
+                rows.append(
+                    {
+                        "frame_idx": frame_idx,
+                        "kept": False,
+                        "frame_gate_reason": "abstain",
+                        "rejected_reasons": ["abstain"],
+                    }
+                )
+                continue
+
+            box = np.asarray(detection["box"], dtype=float)
             rows.append(
                 {
                     "frame_idx": frame_idx,
-                    "kept": False,
-                    "frame_gate_reason": "abstain",
-                    "rejected_reasons": ["abstain"],
+                    "kept": True,
+                    "frame_gate_reason": detection["frame_gate"]["reason"],
+                    "score": float(detection["score"]),
+                    "margin": float(detection["margin"]),
+                    "confidence": float(detection["confidence"]),
+                    "anchor_dist_norm": float(detection["anchor_dist_norm"]),
+                    "search_overlap": float(detection["search_overlap"]),
+                    "box_x1": float(box[0]),
+                    "box_y1": float(box[1]),
+                    "box_x2": float(box[2]),
+                    "box_y2": float(box[3]),
+                    "box_w": float(box[2] - box[0]),
+                    "box_h": float(box[3] - box[1]),
+                    "center_x": float((box[0] + box[2]) / 2.0),
+                    "center_y": float((box[1] + box[3]) / 2.0),
+                    "rejected_reasons": [
+                        item["reason"] for item in detection["rejected_candidates"]
+                    ],
                 }
             )
-            continue
-
-        box = np.asarray(detection["box"], dtype=float)
-        center_x = float((box[0] + box[2]) / 2.0)
-        center_y = float((box[1] + box[3]) / 2.0)
-        rows.append(
-            {
-                "frame_idx": frame_idx,
-                "kept": True,
-                "frame_gate_reason": detection["frame_gate"]["reason"],
-                "score": float(detection["score"]),
-                "margin": float(detection["margin"]),
-                "confidence": float(detection["confidence"]),
-                "anchor_dist_norm": float(detection["anchor_dist_norm"]),
-                "search_overlap": float(detection["search_overlap"]),
-                "box_x1": float(box[0]),
-                "box_y1": float(box[1]),
-                "box_x2": float(box[2]),
-                "box_y2": float(box[3]),
-                "box_w": float(box[2] - box[0]),
-                "box_h": float(box[3] - box[1]),
-                "center_x": center_x,
-                "center_y": center_y,
-                "rejected_reasons": [item["reason"] for item in detection["rejected_candidates"]],
-            }
-        )
 
     return rows
 
@@ -129,7 +144,14 @@ def _window_motion(rows: list[dict]) -> dict:
     scores = np.asarray([r.get("score", 0.0) for r in rows], dtype=float)
     anchors = np.asarray([r.get("anchor_dist_norm", 0.0) for r in rows], dtype=float)
 
-    center_deltas = np.linalg.norm(np.diff(centers, axis=0), axis=1)
+    frame_indices = np.asarray([r["frame_idx"] for r in rows], dtype=float)
+    frame_gaps = np.maximum(np.diff(frame_indices), 1.0)
+    box_scale = max(float(np.median(heights)), 1.0)
+    center_deltas = (
+        np.linalg.norm(np.diff(centers, axis=0), axis=1)
+        / box_scale
+        / frame_gaps
+    )
     area = widths * heights
     area_norm = np.std(area) / max(float(np.mean(area)), 1.0)
 
@@ -148,23 +170,54 @@ def _window_motion(rows: list[dict]) -> dict:
     }
 
 
-def best_low_motion_window(rows: list[dict], window_frames: int = 45) -> dict | None:
+def best_low_motion_window(
+    rows: list[dict],
+    window_frames: int = 45,
+    sample_stride: int = 2,
+) -> dict | None:
     valid = [row for row in rows if row.get("kept")]
-    if len(valid) < window_frames:
+    if len(valid) < 2:
         return None
 
     best: dict | None = None
-    for start in range(0, len(valid) - window_frames + 1):
-        chunk = valid[start : start + window_frames]
-        motion = _window_motion(chunk)
-        candidate = {
-            "start_frame": int(chunk[0]["frame_idx"]),
-            "end_frame": int(chunk[-1]["frame_idx"]),
-            "window_frames": window_frames,
-            **motion,
-        }
-        if best is None or candidate["motion_score"] < best["motion_score"]:
-            best = candidate
+    groups = contiguous_groups(
+        valid,
+        frame_of=lambda row: row["frame_idx"],
+        max_gap_frames=sample_stride * 2,
+    )
+    for group in groups:
+        for start, first in enumerate(group):
+            chunk = [
+                row
+                for row in group[start:]
+                if row["frame_idx"] <= first["frame_idx"] + window_frames
+            ]
+            if chunk[-1]["frame_idx"] - chunk[0]["frame_idx"] < int(0.8 * window_frames):
+                continue
+            expected = (
+                int(
+                    round(
+                        (chunk[-1]["frame_idx"] - chunk[0]["frame_idx"])
+                        / sample_stride
+                    )
+                )
+                + 1
+            )
+            coverage = min(1.0, len(chunk) / max(expected, 1))
+            if coverage < 0.6:
+                continue
+            motion = _window_motion(chunk)
+            candidate = {
+                "start_frame": int(chunk[0]["frame_idx"]),
+                "end_frame": int(chunk[-1]["frame_idx"]),
+                "window_frames": int(
+                    chunk[-1]["frame_idx"] - chunk[0]["frame_idx"] + 1
+                ),
+                "coverage": coverage,
+                **motion,
+            }
+            if best is None or candidate["motion_score"] < best["motion_score"]:
+                best = candidate
     return best
 
 
@@ -183,8 +236,18 @@ def summarize_clip(video_path: Path, vid_stride: int = 2, window_frames: int = 4
 
     first_valid = valid[0]["frame_idx"] if valid else None
     last_valid = valid[-1]["frame_idx"] if valid else None
-    gaps = [b["frame_idx"] - a["frame_idx"] - 1 for a, b in zip(valid, valid[1:])]
-    best = best_low_motion_window(rows, window_frames=window_frames)
+    gaps = [
+        max(0, b["frame_idx"] - a["frame_idx"] - vid_stride)
+        for a, b in zip(valid, valid[1:])
+    ]
+    best = best_low_motion_window(
+        rows,
+        window_frames=window_frames,
+        sample_stride=vid_stride,
+    )
+    if best is not None:
+        best["start_s"] = round(best["start_frame"] / meta["fps"], 3)
+        best["end_s"] = round(best["end_frame"] / meta["fps"], 3)
 
     return {
         **meta,
