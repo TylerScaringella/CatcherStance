@@ -77,6 +77,9 @@ class PipelineContractTests(unittest.TestCase):
         self.assertEqual('{"LKD": 1.0}', detections[0].vote_distribution)
         self.assertEqual("phc,ball,pose", detections[0].detector_provenance)
         self.assertEqual("test_flag", detections[0].quality_flags)
+        self.assertTrue(detections[0].accepted)
+        self.assertEqual(0.8, detections[0].camera_quality)
+        self.assertEqual("", detections[0].rejection_reason)
         self.assertEqual("ok", features[0].status)
 
     def test_pose_quality_rejects_missing_lower_body(self):

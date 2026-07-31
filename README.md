@@ -16,6 +16,15 @@ python src/app.py
 
 Then open `http://127.0.0.1:8000`, select a Duke Baseball game, and run the detection pipeline. The app downloads available pitch videos, processes each clip through catcher detection and stance classification, and writes results to `data/runs/<run-id>/detections.csv`, `detections.json`, `pitch_features.csv`, and `video_manifest.csv`.
 
+The refreshed interface has three linkable work areas:
+
+- `#/games`: choose a game and start, resume, or review a run
+- `#/runs`: monitor queued and active work while continuing to use the app
+- `#/results/<run-id>`: review stance totals, quality flags, timing, votes, and video
+
+Run progress is persisted on disk and refreshed when the browser regains focus, so
+switching views, changing browser tabs, or reloading does not detach the job.
+
 The repository includes a five-pitch sample run from Duke at Liberty on April 21, 2026 in `data/examples/duke-2026-04-21-liberty-sample/`. This lets graders inspect videos, manifests, and stance predictions without TruMedia access.
 
 For the accuracy-first detector, download the optional BaseballCV pitcher/hitter/catcher
@@ -54,11 +63,26 @@ with `CATCHER_STANCE_PHC_MODEL` and `CATCHER_STANCE_EVENT_MODEL`.
 - `data/raw/`: source inputs and downloaded clip media
 - `data/processed/`: generated datasets and derived training files
 - `data/runs/`: active app output for new detection runs
+- `data/tmp/`: disposable per-job intermediate files, cleaned automatically
+- `data/cache/`: ignored runtime cache such as refreshed schedule data
 - `data/examples/`: checked-in sample outputs for review and grading
 - `models/classifier/`: trained stance classifier artifacts
 - `models/pose/`: pose model weights used by the curator and overlay code
 - `models/external/`: ignored cache for optional third-party detection weights
 - `research/`: notebooks and exploratory analysis
+
+## Runtime Storage Contract
+
+Production code resolves writable paths through `project_paths.py` and
+`backend/storage.py`; it must not write next to source modules or notebooks.
+Live outputs stay inside their owning `data/runs/<run-id>/` directory, reusable
+artifacts belong in that run's `artifacts/` folder, and incomplete work belongs
+under `data/tmp/`. Writes to job state and detection exports are atomic.
+
+The API resolves media from server-owned manifests and rejects traversal,
+absolute-path escapes, and symlink escapes. `data/examples/` is always read-only.
+Authentication state, runtime caches, temporary files, live runs, and external
+model weights are ignored by Git.
 
 ## Video Links
 

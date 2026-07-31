@@ -9,13 +9,15 @@ import time
 from datetime import datetime
 from urllib.request import Request, urlopen
 
-from .config import SCHEDULE_PATH, SCHEDULE_REFRESH_INTERVAL_SECONDS
+from .config import RUNTIME_SCHEDULE_PATH, SCHEDULE_PATH, SCHEDULE_REFRESH_INTERVAL_SECONDS
+from .storage import atomic_write_json
 
 _schedule_refresh_started = False
 
 
 def load_schedule():
-    return json.loads(SCHEDULE_PATH.read_text(encoding="utf-8"))
+    path = RUNTIME_SCHEDULE_PATH if RUNTIME_SCHEDULE_PATH.exists() else SCHEDULE_PATH
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def find_game(game_id: str):
@@ -99,7 +101,7 @@ def refresh_schedule_once():
 
     schedule["games"] = fetched_games
     schedule["source_checked"] = datetime.now().date().isoformat()
-    SCHEDULE_PATH.write_text(json.dumps(schedule, indent=2), encoding="utf-8")
+    atomic_write_json(RUNTIME_SCHEDULE_PATH, schedule)
     print(f"Updated schedule from ACC: {len(fetched_games)} games")
 
 

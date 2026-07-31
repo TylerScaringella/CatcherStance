@@ -57,6 +57,10 @@ http://127.0.0.1:8000
 
 Keep the terminal running while you use the app. Stop the server with `Ctrl+C`.
 
+The app opens on the Games view. Active Runs continues monitoring work while you
+navigate elsewhere, and Results exposes pitch-level timing, temporal votes,
+quality flags, detector provenance, and source/overlay replay.
+
 ## First TruMedia Login
 
 The first time the downloader runs, Playwright may open a Chromium window and the terminal may ask you to log in to TruMedia.
@@ -108,6 +112,11 @@ Important output files:
 - `detections.json`: pitch-level stance predictions in JSON format
 - `job.json`: saved app job status and metadata
 - `downloads/`: downloaded pitch-by-pitch video clips
+- `artifacts/`: durable generated diagnostics and reusable run-specific assets
+
+Temporary processing files are created under `data/tmp/<run-id>-*` and removed
+after success or failure. Refreshed schedule data is stored in `data/cache/`
+rather than overwriting the checked-in schedule source.
 
 The main prediction fields in `detections.csv` are:
 
@@ -136,3 +145,20 @@ pip install -r requirements.txt
 ```
 
 If model loading fails, confirm that the files in `models/classifier/` and `models/pose/yolo26n-pose.pt` are present.
+
+## Smoke Tests
+
+Run the automated suite:
+
+```bash
+PYTHONPATH=src ./.venv/bin/python -m unittest discover -s tests -v
+```
+
+Start the app and verify the checked-in sample without TruMedia:
+
+```bash
+python src/app.py
+```
+
+Open `http://127.0.0.1:8000/#/games`, choose the Liberty sample, and select
+`Review results`. Expected labels are `LKD, LKD, RKD, LKD, LKD`.

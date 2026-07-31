@@ -4,9 +4,11 @@ from flask import Flask
 
 from .routes import register_routes
 from .schedule import start_schedule_refresh_job
+from .storage import initialize_storage
 
 
 def create_app():
+    initialize_storage()
     app = Flask(__name__, static_folder=None)
     register_routes(app)
     return app

@@ -20,6 +20,13 @@ class PitchDetection:
     vote_distribution: str = ""
     detector_provenance: str = ""
     quality_flags: str = ""
+    accepted: bool = False
+    rejection_reason: str = ""
+    camera_quality: float = 0.0
+    fps: float | str = ""
+    impact_seconds: float | str = ""
+    window_start_seconds: float | str = ""
+    window_end_seconds: float | str = ""
 
 
 @dataclass

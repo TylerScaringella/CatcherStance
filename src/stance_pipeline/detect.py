@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Iterable
 
 from tqdm import tqdm
 
+from backend.storage import atomic_write_text, run_lock
 from .analyzer import PitchStanceConfig, analyze_pitch_clip
 from .config import StatusCallback
 from .schemas import PitchDetection, PitchFeature
@@ -49,6 +51,22 @@ def detect_stances_for_manifest(
         try:
             result = analyze_pitch_clip(video_path, config=pipeline_config)
             status = "ok" if result.accepted else result.rejection_reason or "rejected"
+            fps = float((result.diagnostics or {}).get("fps") or 0)
+            impact_seconds = (
+                result.impact_frame / fps
+                if result.impact_frame is not None and fps
+                else ""
+            )
+            window_start_seconds = (
+                result.window_start_frame / fps
+                if result.window_start_frame is not None and fps
+                else ""
+            )
+            window_end_seconds = (
+                result.window_end_frame / fps
+                if result.window_end_frame is not None and fps
+                else ""
+            )
             features = (
                 result.feature_vector.tolist()
                 if result.feature_vector is not None
@@ -78,6 +96,13 @@ def detect_stances_for_manifest(
                     vote_distribution=json.dumps(result.vote_distribution, sort_keys=True),
                     detector_provenance=",".join(result.detector_provenance),
                     quality_flags=",".join(result.quality_flags),
+                    accepted=result.accepted,
+                    rejection_reason=result.rejection_reason or "",
+                    camera_quality=result.camera_quality,
+                    fps=fps or "",
+                    impact_seconds=impact_seconds,
+                    window_start_seconds=window_start_seconds,
+                    window_end_seconds=window_end_seconds,
                 )
             )
         except Exception as exc:
@@ -113,17 +138,25 @@ def write_detection_outputs(
     csv_path = run_dir / "detections.csv"
     feature_csv_path = run_dir / "pitch_features.csv"
 
-    json_path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+    csv_buffer = io.StringIO(newline="")
+    with csv_buffer as f:
         fieldnames = list(PitchDetection.__dataclass_fields__.keys())
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+        csv_content = f.getvalue()
 
-    with open(feature_csv_path, "w", newline="", encoding="utf-8") as f:
+    feature_buffer = io.StringIO(newline="")
+    with feature_buffer as f:
         fieldnames = list(PitchFeature.__dataclass_fields__.keys())
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(features)
+        feature_content = f.getvalue()
+
+    with run_lock(run_dir.name):
+        atomic_write_text(json_path, json.dumps(rows, indent=2) + "\n")
+        atomic_write_text(csv_path, csv_content)
+        atomic_write_text(feature_csv_path, feature_content)
 
     return rows
