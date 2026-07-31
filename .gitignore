@@ -37,4 +37,8 @@ data/examples/*
 # Image files
 *.jpg
 
+# Downloaded third-party model assets and generated research diagnostics
+models/external/
+research/outputs/generated/
+
 # Keep notebooks, source files, docs, and the trained lightweight classifier artifacts tracked intentionally.

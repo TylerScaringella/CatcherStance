@@ -1,0 +1,206 @@
+[
+  {
+    "video": "pitch-pix-69e939e0ee33ff11241e0939-356-369.mp4",
+    "path": "data/examples/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-356-369.mp4",
+    "fps": 59.928,
+    "frames": 817,
+    "duration_s": 13.633,
+    "vid_stride": 2,
+    "sampled_frames": 390,
+    "valid_detections": 150,
+    "abstentions": 240,
+    "first_valid_frame": 430,
+    "last_valid_frame": 772,
+    "max_gap_in_valid_frames": 8,
+    "median_valid_motion": 2.395,
+    "frame_gate_reasons": {
+      "abstain": 240,
+      "ok": 150
+    },
+    "candidate_rejection_reasons": {
+      "pitcher_like_low_tall_geometry": 138,
+      "stance_too_narrow": 91,
+      "invalid_zone": 129,
+      "hips_too_far_from_anchor": 74,
+      "knees_too_straight": 81,
+      "not_low_enough": 7
+    },
+    "best_window": {
+      "start_frame": 614,
+      "end_frame": 656,
+      "window_frames": 43,
+      "coverage": 1.0,
+      "mean_center_delta": 0.00466559296836949,
+      "std_center_delta": 0.0030896915685660695,
+      "area_norm": 0.015354096388984667,
+      "mean_score": 0.8089837999064664,
+      "mean_anchor_dist_norm": 0.268217999162485,
+      "motion_score": -0.13868737905537304,
+      "start_s": 10.246,
+      "end_s": 10.946
+    }
+  },
+  {
+    "video": "pitch-pix-69e939e0ee33ff11241e0939-378-388.mp4",
+    "path": "data/examples/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-378-388.mp4",
+    "fps": 59.906,
+    "frames": 635,
+    "duration_s": 10.6,
+    "vid_stride": 2,
+    "sampled_frames": 300,
+    "valid_detections": 109,
+    "abstentions": 191,
+    "first_valid_frame": 276,
+    "last_valid_frame": 532,
+    "max_gap_in_valid_frames": 12,
+    "median_valid_motion": 3.7,
+    "frame_gate_reasons": {
+      "abstain": 191,
+      "ok": 109
+    },
+    "candidate_rejection_reasons": {
+      "pitcher_like_low_tall_geometry": 94,
+      "stance_too_narrow": 61,
+      "hips_too_far_from_anchor": 99,
+      "knees_too_straight": 25,
+      "too_tall_and_low_for_catcher": 1
+    },
+    "best_window": {
+      "start_frame": 414,
+      "end_frame": 458,
+      "window_frames": 45,
+      "coverage": 1.0,
+      "mean_center_delta": 0.005282086721921914,
+      "std_center_delta": 0.003337222793829485,
+      "area_norm": 0.026726716367290123,
+      "mean_score": 0.7954134791870819,
+      "mean_anchor_dist_norm": 0.26544379711364374,
+      "motion_score": -0.12373666995437489,
+      "start_s": 6.911,
+      "end_s": 7.645
+    }
+  },
+  {
+    "video": "pitch-pix-69e939e0ee33ff11241e0939-395-409.mp4",
+    "path": "data/examples/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-395-409.mp4",
+    "fps": 59.933,
+    "frames": 874,
+    "duration_s": 14.583,
+    "vid_stride": 2,
+    "sampled_frames": 420,
+    "valid_detections": 118,
+    "abstentions": 302,
+    "first_valid_frame": 408,
+    "last_valid_frame": 678,
+    "max_gap_in_valid_frames": 14,
+    "median_valid_motion": 5.587,
+    "frame_gate_reasons": {
+      "abstain": 302,
+      "ok": 118
+    },
+    "candidate_rejection_reasons": {
+      "pitcher_like_low_tall_geometry": 104,
+      "stance_too_narrow": 93,
+      "hips_too_far_from_anchor": 54,
+      "knees_too_straight": 29,
+      "too_tall_and_low_for_catcher": 2
+    },
+    "best_window": {
+      "start_frame": 436,
+      "end_frame": 480,
+      "window_frames": 45,
+      "coverage": 1.0,
+      "mean_center_delta": 0.009924454847257189,
+      "std_center_delta": 0.006803215529039111,
+      "area_norm": 0.03691226386382683,
+      "mean_score": 0.7997426123724489,
+      "mean_anchor_dist_norm": 0.287330879316159,
+      "motion_score": -0.10630858823436666,
+      "start_s": 7.275,
+      "end_s": 8.009
+    }
+  },
+  {
+    "video": "pitch-pix-69e939e0ee33ff11241e0939-428-444.mp4",
+    "path": "data/examples/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-428-444.mp4",
+    "fps": 59.94,
+    "frames": 992,
+    "duration_s": 16.55,
+    "vid_stride": 2,
+    "sampled_frames": 480,
+    "valid_detections": 256,
+    "abstentions": 224,
+    "first_valid_frame": 192,
+    "last_valid_frame": 892,
+    "max_gap_in_valid_frames": 86,
+    "median_valid_motion": 2.559,
+    "frame_gate_reasons": {
+      "abstain": 224,
+      "ok": 256
+    },
+    "candidate_rejection_reasons": {
+      "stance_too_narrow": 199,
+      "pitcher_like_low_tall_geometry": 250,
+      "knees_too_straight": 77,
+      "too_far_from_search_region": 10,
+      "hips_too_far_from_anchor": 69,
+      "invalid_zone": 17,
+      "legs_too_straight": 1,
+      "bad_compactness": 1
+    },
+    "best_window": {
+      "start_frame": 414,
+      "end_frame": 456,
+      "window_frames": 43,
+      "coverage": 1.0,
+      "mean_center_delta": 0.003930051481232454,
+      "std_center_delta": 0.0017133317664200067,
+      "area_norm": 0.017483228770630847,
+      "mean_score": 0.8368937454724513,
+      "mean_anchor_dist_norm": 0.27369309859277974,
+      "motion_score": -0.14425213707620696,
+      "start_s": 6.907,
+      "end_s": 7.608
+    }
+  },
+  {
+    "video": "pitch-pix-69e939e0ee33ff11241e0939-449-462.mp4",
+    "path": "data/examples/duke-2026-04-21-liberty-sample/downloads/pitch-pix-69e939e0ee33ff11241e0939-449-462.mp4",
+    "fps": 59.928,
+    "frames": 811,
+    "duration_s": 13.533,
+    "vid_stride": 2,
+    "sampled_frames": 390,
+    "valid_detections": 301,
+    "abstentions": 89,
+    "first_valid_frame": 0,
+    "last_valid_frame": 702,
+    "max_gap_in_valid_frames": 16,
+    "median_valid_motion": 2.562,
+    "frame_gate_reasons": {
+      "ok": 301,
+      "abstain": 89
+    },
+    "candidate_rejection_reasons": {
+      "pitcher_like_low_tall_geometry": 157,
+      "too_far_from_search_region": 167,
+      "knees_too_straight": 117,
+      "hips_too_far_from_anchor": 38,
+      "stance_too_narrow": 105
+    },
+    "best_window": {
+      "start_frame": 474,
+      "end_frame": 518,
+      "window_frames": 45,
+      "coverage": 1.0,
+      "mean_center_delta": 0.0037293127446080595,
+      "std_center_delta": 0.0021294013204332337,
+      "area_norm": 0.014395350586659502,
+      "mean_score": 0.8465058998034579,
+      "mean_anchor_dist_norm": 0.264404636427582,
+      "motion_score": -0.1490471153089908,
+      "start_s": 7.909,
+      "end_s": 8.644
+    }
+  }
+]

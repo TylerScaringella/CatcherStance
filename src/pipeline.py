@@ -1,4 +1,6 @@
 from stance_pipeline import (
+    PitchStanceConfig,
+    analyze_pitch_clip,
     detect_stances_for_manifest,
     overlay_mjpeg_frames,
     run_detection_for_existing_run,
@@ -7,6 +9,8 @@ from stance_pipeline import (
 )
 
 __all__ = [
+    "PitchStanceConfig",
+    "analyze_pitch_clip",
     "detect_stances_for_manifest",
     "overlay_mjpeg_frames",
     "run_detection_for_existing_run",
