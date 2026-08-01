@@ -194,7 +194,10 @@ def manifest_counts(location_or_id: RunLocation | str) -> dict[str, int]:
         if isinstance(location_or_id, RunLocation)
         else resolve_run(location_or_id)
     )
-    counts = {"total": 0, "downloaded": 0, "cleaned": 0, "pending": 0, "failed": 0}
+    counts = {
+        "total": 0, "downloaded": 0, "cleaned": 0, "pending": 0, "failed": 0,
+        "skipped": 0,
+    }
     if location is None:
         return counts
     for row in manifest_rows(location):
@@ -305,7 +308,8 @@ def job_from_location(location: RunLocation) -> dict | None:
             },
         )
     elif counts["total"] > 0:
-        if counts["downloaded"] == counts["total"] and counts["failed"] == 0:
+        available = counts["downloaded"] + counts["cleaned"] + counts["skipped"]
+        if available == counts["total"] and counts["failed"] == 0:
             if saved.get("status") in ACTIVE_STATUSES and time.time() - updated_at < 600:
                 job["status"] = saved.get("status")
                 job["phase"] = saved.get("phase", "detecting")
@@ -318,20 +322,22 @@ def job_from_location(location: RunLocation) -> dict | None:
                 )
             job["progress"] = {
                 "phase": job["phase"],
-                "current": counts["downloaded"],
+                "current": available,
                 "total": counts["total"],
                 "percent": 100,
             }
         else:
             recent = time.time() - updated_at < 600
             status = saved.get("status") if recent else "interrupted"
-            if status not in ACTIVE_STATUSES:
+            if status not in ACTIVE_STATUSES and status != "auth_required":
                 status = "interrupted"
             job.update(
                 status=status,
-                phase="downloading",
+                phase="auth_required" if status == "auth_required" else "downloading",
                 message=(
-                    f"Downloading videos: {counts['downloaded']} of {counts['total']}"
+                    "TruMedia authentication must be refreshed before this run can continue."
+                    if status == "auth_required"
+                    else f"Downloading videos: {counts['downloaded']} of {counts['total']}"
                     if status != "interrupted"
                     else f"Partial run: {counts['downloaded']} of {counts['total']} downloaded"
                 ),
@@ -455,6 +461,9 @@ def run_job(job_id: str, start_url: str) -> None:
             start_url=start_url,
             status_callback=lambda message, current, total: set_job_progress(
                 job_id, message, current, total
+            ),
+            discovery_callback=lambda stats: set_job(
+                job_id, discovery=stats, pitch_scope="duke_catcher"
             ),
         )
         from .media_lifecycle import finalize_run_media

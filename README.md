@@ -24,7 +24,7 @@ The refreshed interface has three linkable work areas:
 - `#/runs`: monitor queued and active work while continuing to use the app
 - `#/results/<run-id>`: review stance totals, quality flags, timing, votes, and video
 
-The season selector defaults to 2026 and is ready for 2027. Completed games can be filtered by opponent, date, site, conference status, result, and analysis status. TruMedia games are matched by date and normalized opponent; ambiguous matches require explicit confirmation.
+The season selector defaults to 2026 and is ready for 2027. Completed games can be filtered by opponent, date, site, conference status, result, and analysis status. TruMedia games are resolved from the selected date's Scores dataset using Duke's team ID, opponent, result, and doubleheader game number. Ambiguous matches require explicit confirmation.
 
 Run progress is persisted on disk and refreshed when the browser regains focus, so
 switching views, changing browser tabs, or reloading does not detach the job.
@@ -96,7 +96,7 @@ TruMedia credentials are never entered into the application. Export a browser se
 python src/trumedia_auth.py
 ```
 
-Start the app with deployment secrets, unlock the protected integration screen, and upload the generated JSON:
+Start the app with independent deployment secrets:
 
 ```bash
 export CATCHER_STANCE_ADMIN_TOKEN='replace-with-a-long-random-value'
@@ -104,9 +104,11 @@ export CATCHER_STANCE_SECRET_KEY='replace-with-an-independent-random-value'
 python src/app.py
 ```
 
-The server validates the state in isolated headless Chromium before atomically installing it with owner-only permissions. Container deployments must mount `data/auth/` as a private writable volume and terminate TLS before Flask.
+Open the application and select **Connect TruMedia** in the persistent header. Enter the admin token and upload `data/auth/playwright_state.export.json`. The session can be configured, replaced, or revalidated before selecting a game; an expired session also reopens the same workflow when a run starts.
 
-Downloads use atomic `.part` promotion and resumable manifests. Full source clips are removed by default only after detections and compact review MP4s validate. Select **Retain full source clips** before starting when complete pitch clips are required. Failed or interrupted runs retain downloads for resumption.
+The server validates the state in isolated headless Chromium before atomically installing it as `data/auth/playwright_state.json` with owner-only permissions. Both files are bearer credentials, are ignored by Git, and must never be committed or baked into a container image. Container deployments must mount `data/auth/` as a private writable volume and terminate TLS before Flask.
+
+For each matched game, the downloader reads the complete TruMedia pitch dataset and selects only pitches where Duke (`730336256`) is the catching team. Stable `s3://` media references are stored in the private run manifest; expiring signed AWS URLs are generated in short batches and never persisted. Downloads use atomic `.part` promotion and resumable manifests. Full source clips are removed by default only after detections and compact review MP4s validate. Failed or interrupted runs receive fresh media signatures when resumed.
 
 The GameTracker dialog is an interactive prototype. It validates a Google Sheets URL and simulates tab selection and export, but it does not contact Google or persist spreadsheet settings.
 

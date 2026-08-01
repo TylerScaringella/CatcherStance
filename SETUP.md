@@ -30,7 +30,7 @@ Install the project dependencies.
 pip install -r requirements.txt
 ```
 
-Install the Playwright Chromium browser. This is required because the downloader opens TruMedia, clicks through the pitch cards, and captures the video URLs.
+Install the Playwright Chromium browser. This is required because the downloader opens authenticated TruMedia game pages and reads their game and pitch datasets.
 
 ```bash
 python -m playwright install chromium
@@ -80,7 +80,9 @@ export CATCHER_STANCE_SECRET_KEY='replace-with-an-independent-random-value'
 python src/app.py
 ```
 
-Select an unanalyzed game. When prompted, enter the admin token and upload the exported JSON. The app validates it in headless Chromium and installs it as `data/auth/playwright_state.json` with owner-only permissions. Repeat the export and upload process when the status reports an expired session.
+Open the application and select **Connect TruMedia** in the header. Enter the admin token and upload `data/auth/playwright_state.export.json`. You do not need to start a game first. The app validates it in headless Chromium and atomically installs it as `data/auth/playwright_state.json` with owner-only permissions. The same dialog can revalidate or replace the session later.
+
+Treat both session files as bearer credentials. They are ignored by Git, must not be committed or shared in logs, and must not be baked into a container image. If the header reports an expired session, export a replacement and install it through the same dialog.
 
 For containers, mount `data/auth/` as a private writable volume. Provide both secrets through the deployment secret manager, enable `CATCHER_STANCE_SECURE_COOKIES=1`, and terminate HTTPS before the app. Never bake either session JSON into an image.
 
@@ -89,12 +91,13 @@ For containers, mount `data/auth/` as a private writable volume. Provide both se
 1. Start the app with `python src/app.py`.
 2. Open `http://127.0.0.1:8000`.
 3. Select the included Duke at Liberty sample game from the schedule on the left.
-4. Click `Start Detection`. The server automatically resolves the Duke schedule game to TruMedia.
-5. Confirm the exact TruMedia game only when multiple candidates are shown.
-6. Wait for the job status to move through downloading, detection, and completion.
-7. Review the pitch-level results table.
-8. Use `Export CSV` or `Export JSON` to save the predictions.
-9. Open a pitch row to view its source or compact review clip and optional pose overlay.
+4. Confirm that the header reports `TruMedia ready`.
+5. Click `Start Detection`. The server resolves the game from TruMedia Scores.
+6. For a doubleheader, confirm the exact game only when game number, opponent, and result do not produce one unambiguous match.
+7. Wait for pitch discovery, downloading, detection, and completion.
+8. Review the Duke-catching pitch results.
+9. Use `Export CSV` or `Export JSON` to save the predictions.
+10. Open a pitch row to view its source or compact review clip and optional pose overlay.
 
 Completed games reuse their latest result. `Reprocess` creates a versioned run while preserving previous revisions.
 
@@ -110,7 +113,7 @@ data/runs/<run-id>/
 
 Important output files:
 
-- `video_manifest.csv`: the pitch video URLs, local video paths, and download statuses
+- `video_manifest.csv`: stable pitch/media identifiers, catcher metadata, local video paths, and download statuses; signed URLs are never persisted
 - `pitch_features.csv`: extracted catcher keypoint features for each pitch
 - `detections.csv`: pitch-level stance predictions in table format
 - `detections.json`: pitch-level stance predictions in JSON format
@@ -136,7 +139,7 @@ The main prediction fields in `detections.csv` are:
 
 If the app starts but downloads do not begin, check the persisted run phase in Active Runs. Background jobs never wait on terminal input.
 
-If TruMedia validation fails, export a fresh session with `python src/trumedia_auth.py` and upload it again through the protected integration dialog.
+If TruMedia validation fails, export a fresh session with `python src/trumedia_auth.py` and upload it through **Connect TruMedia** in the header.
 
 If Playwright cannot launch Chromium, rerun:
 
@@ -173,7 +176,7 @@ Additional browser smoke checks:
 
 1. Confirm the 2026 selector and completed Duke games load.
 2. Search for `Liberty` and filter by site, result, conference status, and date.
-3. Start the April 14 Liberty game without a session and confirm the protected authentication dialog appears.
+3. Temporarily relocate the ignored installed session, select **Connect TruMedia** in the header, and confirm the protected dialog opens without starting a game.
 4. Open the April 21 sample, verify five results, and filter to `RKD`.
 5. Open **Export to GameTracker**, enter a URL shaped like `https://docs.google.com/spreadsheets/d/test/edit`, preview simulated tabs, and simulate an export. Confirm the dialog states that no data was written.
 6. Resize to 1440px, 840px, and 390px and confirm navigation, schedule cards, result rows, and dialogs remain usable without horizontal overflow.

@@ -37,6 +37,8 @@ export const uploadTruMediaSession = (file) => {
   body.append("session", file);
   return request("/api/integrations/trumedia/session", { method: "POST", body });
 };
+export const validateTruMediaSession = () =>
+  request("/api/integrations/trumedia/validate", { method: "POST" });
 export const confirmTruMediaMatch = (gameId, candidateId) =>
   request(`/api/games/${encodeURIComponent(gameId)}/trumedia-match`, {
     method: "POST",

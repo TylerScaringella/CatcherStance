@@ -9,9 +9,10 @@ from downloader.main import run_download_pipeline
 def run_game_detection(
     run_id: str,
     start_url: str,
-    headless: bool = False,
+    headless: bool = True,
     download_workers: int = 8,
     status_callback: StatusCallback | None = None,
+    discovery_callback=None,
 ) -> list[dict]:
     run_dir = RUNS_DIR / run_id
     download_dir = run_dir / "downloads"
@@ -27,6 +28,8 @@ def run_game_detection(
         storage_state_path=str(storage_state_path),
         headless=headless,
         download_workers=download_workers,
+        status_callback=status_callback,
+        discovery_callback=discovery_callback,
     )
     if status_callback is not None:
         status_callback("Running catcher detection and stance classifier", None, None)

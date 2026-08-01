@@ -48,7 +48,13 @@ def _error(message: str, status: int, code: str | None = None, **details):
 
 
 def _public_candidate(candidate: dict) -> dict:
-    return {key: candidate.get(key) for key in ("id", "date", "opponent", "opponent_key")}
+    return {
+        key: candidate.get(key)
+        for key in (
+            "id", "date", "start_time", "game_number", "opponent", "opponent_key",
+            "site", "result", "status", "trackman_available",
+        )
+    }
 
 
 def _admin_authorized() -> bool:
@@ -153,7 +159,22 @@ def register_routes(app):
         finally:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
-        return jsonify({"status": "connected", "connected": True})
+        return jsonify(TruMediaProvider().status())
+
+    @app.post("/api/integrations/trumedia/validate")
+    def validate_trumedia_session():
+        if not _admin_authorized():
+            return _error("admin authorization is required", 401, "admin_required")
+        provider = TruMediaProvider()
+        if not provider.state_path.is_file():
+            return _error("TruMedia authentication is required", 409, "auth_required")
+        try:
+            provider.validate_live(provider.state_path)
+        except AuthenticationRequired:
+            return _error("the saved TruMedia session is expired", 409, "expired_session")
+        except Exception:
+            return _error("the TruMedia session could not be validated", 503, "validation_failed")
+        return jsonify(provider.status())
 
     @app.get("/api/games/<game_id>/trumedia-match")
     def trumedia_match(game_id: str):
@@ -177,7 +198,7 @@ def register_routes(app):
             return _error("unknown game_id", 404)
         candidate_id = str((request.get_json(silent=True) or {}).get("candidate_id") or "")
         try:
-            candidates = TruMediaProvider().discover_games()
+            candidates = TruMediaProvider().discover_games(str(game["date"]))
         except AuthenticationRequired:
             return _error("TruMedia authentication is required", 409, "auth_required")
         candidate = next((item for item in candidates if item.get("id") == candidate_id), None)
@@ -388,6 +409,7 @@ def register_routes(app):
             "revision": revision,
             "reprocess_of": latest_job_for_game(game["id"])["id"] if reprocess and latest_job_for_game(game["id"]) else None,
             "retain_sources": bool(payload.get("retain_sources", False)),
+            "pitch_scope": "duke_catcher",
             "trumedia_match": _public_candidate(match.match),
             "result_count": 0,
             "results": [],

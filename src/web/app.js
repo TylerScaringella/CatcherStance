@@ -9,6 +9,7 @@ import {
   startRun,
   unlockAdmin,
   uploadTruMediaSession,
+  validateTruMediaSession,
 } from "./api.js";
 import {
   badge,
@@ -50,6 +51,8 @@ const state = {
 const content = document.querySelector("#appContent");
 const activityText = document.querySelector("#activityText");
 const activityButton = document.querySelector("#activityButton");
+const trumediaButton = document.querySelector("#trumediaButton");
+const trumediaText = document.querySelector("#trumediaText");
 const connectionState = document.querySelector("#connectionState");
 const liveRegion = document.querySelector("#liveRegion");
 const toastRegion = document.querySelector("#toastRegion");
@@ -106,12 +109,17 @@ function workflowHeader(kicker, title, description) {
   ]);
 }
 
-function openAuthentication(game, container, reprocess = false) {
+function openAuthentication(game = null, container = null, reprocess = false) {
   const token = element("input", { type: "password", autocomplete: "current-password", placeholder: "Admin token", "aria-label": "Admin token" });
   const file = element("input", { type: "file", accept: "application/json,.json", "aria-label": "Playwright storage-state JSON" });
-  const status = element("p", { className: "form-status", text: "Unlock this protected action, then upload an exported Playwright session." });
+  const status = element("p", {
+    className: "form-status",
+    text: state.trumedia.connected
+      ? "The installed session is ready. Revalidate it or upload a replacement."
+      : "Unlock this protected action, then upload an exported Playwright session.",
+  });
   const submit = element("button", {
-    className: "button primary", type: "button", text: "Validate session",
+    className: "button primary", type: "button", text: state.trumedia.connected ? "Replace session" : "Upload session",
     on: { click: async () => {
       if (!token.value || !file.files?.[0]) {
         status.textContent = "An admin token and storage-state JSON file are required.";
@@ -124,8 +132,9 @@ function openAuthentication(game, container, reprocess = false) {
         await unlockAdmin(token.value);
         state.trumedia = await uploadTruMediaSession(file.files[0]);
         toast("TruMedia session connected.", "success");
+        updateChrome();
         closeWorkflow();
-        await submitRun(game, container, reprocess);
+        if (game && container) await submitRun(game, container, reprocess);
       } catch (error) {
         status.textContent = error.message;
         submit.disabled = false;
@@ -133,9 +142,49 @@ function openAuthentication(game, container, reprocess = false) {
       }
     } },
   });
+  const revalidate = element("button", {
+    className: "button secondary", type: "button", text: "Revalidate current",
+    on: { click: async () => {
+      if (!token.value) {
+        status.textContent = "Enter the admin token before revalidating.";
+        return;
+      }
+      revalidate.disabled = true;
+      revalidate.textContent = "Validating…";
+      status.textContent = "Checking the installed session against TruMedia.";
+      try {
+        await unlockAdmin(token.value);
+        state.trumedia = await validateTruMediaSession();
+        status.textContent = "The installed TruMedia session is valid.";
+        toast("TruMedia session validated.", "success");
+        updateChrome();
+      } catch (error) {
+        state.trumedia = { ...state.trumedia, connected: false, status: error.code === "expired_session" ? "expired" : state.trumedia.status };
+        status.textContent = error.message;
+        updateChrome();
+      } finally {
+        revalidate.disabled = false;
+        revalidate.textContent = "Revalidate current";
+      }
+    } },
+  });
   clear(workflowDialogContent).append(
-    workflowHeader("Secure integration", "Connect TruMedia", "Upload a Playwright storage-state export for headless processing."),
+    workflowHeader("Secure integration", "TruMedia session", "Configure headless access before selecting or processing a game."),
     element("div", { className: "workflow-body" }, [
+      element("div", { className: `integration-summary ${state.trumedia.connected ? "connected" : "needs-auth"}` }, [
+        element("span", { className: "integration-dot", "aria-hidden": "true" }),
+        element("div", {}, [
+          element("strong", { text: state.trumedia.connected ? "Session configured" : `Session ${statusLabel(state.trumedia.status || "missing")}` }),
+          element("span", { text: state.trumedia.connected ? "Automatic game and pitch discovery is available." : "Upload a current session before running a live game." }),
+        ]),
+      ]),
+      element("ol", { className: "setup-steps" }, [
+        element("li", { text: "Run python src/trumedia_auth.py from the repository root." }),
+        element("li", { text: "Sign in and wait for the TruMedia baseball workspace to load." }),
+        element("li", { text: "Return to the terminal and press Enter to export the session." }),
+        element("li", { text: "Enter CATCHER_STANCE_ADMIN_TOKEN below." }),
+        element("li", { text: "Upload data/auth/playwright_state.export.json." }),
+      ]),
       element("div", { className: "security-note" }, [
         element("strong", { text: "Bearer credential" }),
         element("span", { text: "The uploaded file is encrypted in transit when deployed behind HTTPS and stored with owner-only permissions." }),
@@ -145,6 +194,7 @@ function openAuthentication(game, container, reprocess = false) {
       status,
       element("div", { className: "dialog-actions" }, [
         element("button", { className: "button ghost", type: "button", text: "Cancel", on: { click: closeWorkflow } }),
+        ...(state.trumedia.connected ? [revalidate] : []),
         submit,
       ]),
     ]),
@@ -161,7 +211,14 @@ function openMatchSelection(game, candidates, container, reprocess = false) {
     }),
     element("span", {}, [
       element("strong", { text: candidate.opponent || "TruMedia game" }),
-      element("small", { text: formatDate(candidate.date) }),
+      element("small", {
+        text: [
+          formatDate(candidate.date),
+          candidate.start_time || null,
+          candidate.game_number ? `Game ${candidate.game_number}` : null,
+          candidate.result || null,
+        ].filter(Boolean).join(" · "),
+      }),
     ]),
   ]));
   const confirm = element("button", {
@@ -201,6 +258,12 @@ function updateChrome() {
     ? `Live · ${state.lastUpdated?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) || "now"}`
     : "Reconnecting";
   connectionState.classList.toggle("is-offline", !state.connected);
+  trumediaText.textContent = state.trumedia.connected ? "TruMedia ready" : "Connect TruMedia";
+  trumediaButton.classList.toggle("connected", Boolean(state.trumedia.connected));
+  trumediaButton.setAttribute(
+    "aria-label",
+    state.trumedia.connected ? "Manage connected TruMedia session" : "Connect TruMedia session",
+  );
 
   const current = route().view;
   document.querySelectorAll("[data-nav]").forEach((link) => {
@@ -405,7 +468,11 @@ function renderGames() {
     ]);
     if (!run?.read_only) detail.append(advanced);
     if (!run?.read_only) {
-      detail.append(element("div", { className: `integration-strip ${state.trumedia.connected ? "connected" : "needs-auth"}` }, [
+      detail.append(element("button", {
+        className: `integration-strip ${state.trumedia.connected ? "connected" : "needs-auth"}`,
+        type: "button",
+        on: { click: () => openAuthentication() },
+      }, [
         element("span", { className: "integration-dot", "aria-hidden": "true" }),
         element("div", {}, [
           element("strong", { text: state.trumedia.connected ? "TruMedia session configured" : "TruMedia session required" }),
@@ -820,6 +887,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") refresh(false);
 });
 activityButton.addEventListener("click", () => { location.hash = "#/runs"; });
+trumediaButton.addEventListener("click", () => openAuthentication());
 pitchDialog.addEventListener("close", () => clear(pitchDialogContent));
 pitchDialog.addEventListener("click", (event) => {
   if (event.target === pitchDialog) pitchDialog.close();

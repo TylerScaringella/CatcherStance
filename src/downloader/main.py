@@ -11,7 +11,7 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from downloader.config import DOWNLOAD_DIR, DOWNLOAD_WORKERS, MANIFEST_PATH, START_URL, STORAGE_STATE_PATH
-from downloader.crawler import collect_s3_urls, ensure_grid_loaded, get_logged_in_context
+from downloader.crawler import discover_pitch_media, get_logged_in_context, sign_media_ref
 from downloader.files import download_one_row
 from downloader.manifest import load_manifest, write_manifest
 
@@ -23,97 +23,122 @@ def run_download_pipeline(
     storage_state_path=STORAGE_STATE_PATH,
     headless=False,
     download_workers=DOWNLOAD_WORKERS,
+    status_callback=None,
+    discovery_callback=None,
 ):
     os.makedirs(download_dir, exist_ok=True)
-    rows, by_clip_id, by_s3_url = load_manifest(manifest_path)
+    rows, by_clip_id, by_media_ref = load_manifest(manifest_path)
     print(f"Loaded manifest rows: {len(rows)}")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
-        context, page, _ = get_logged_in_context(
-            browser,
-            start_url=start_url,
-            storage_state_path=storage_state_path,
-        )
-
-        print(f"Using saved Playwright session: {storage_state_path}")
         try:
-            ensure_grid_loaded(page)
-        except Exception as exc:
-            raise RuntimeError("TruMedia session is expired or the pitch grid is unavailable") from exc
+            _, page, _ = get_logged_in_context(
+                browser,
+                start_url=start_url,
+                storage_state_path=storage_state_path,
+            )
+            collected_this_run, discovery = discover_pitch_media(
+                page,
+                start_url,
+                rows,
+                by_clip_id,
+                by_media_ref,
+                download_dir=download_dir,
+            )
+            write_manifest(manifest_path, rows)
+            print(
+                "Discovered "
+                f"{discovery['total_pitches']} pitches; selected "
+                f"{discovery['selected_pitches']} Duke-catching pitches."
+            )
+            if status_callback is not None:
+                status_callback(
+                    f"Discovered {discovery['selected_pitches']} Duke-catching pitches",
+                    discovery["downloadable_pitches"],
+                    discovery["selected_pitches"],
+                )
+            if discovery_callback is not None:
+                discovery_callback(dict(discovery))
 
-        collected_this_run = collect_s3_urls(page, rows, by_clip_id, by_s3_url, download_dir=download_dir)
-        write_manifest(manifest_path, rows)
-        print(f"\nCollected new URLs this run: {collected_this_run}")
-        print(f"Manifest updated: {manifest_path}")
-
-        browser.close()
-
-    pending_rows = []
-    already_downloaded = 0
-
-    for row in rows:
-        saved_path = row["saved_path"]
-        if saved_path and os.path.exists(saved_path):
-            row["status"] = "downloaded"
-            row["error"] = ""
-            already_downloaded += 1
-            continue
-
-        if row.get("s3_url") and row.get("clip_id"):
-            row["status"] = "pending"
-            pending_rows.append(row)
-
-    write_manifest(manifest_path, rows)
-
-    print(f"\nAlready downloaded on disk: {already_downloaded}")
-    print(f"Pending downloads: {len(pending_rows)}")
-
-    if not pending_rows:
-        print("Nothing to download.")
-        print(f"Files saved in: {download_dir}")
-        return rows
-
-    print(f"\nStarting parallel downloads with {download_workers} workers...")
-
-    completed = 0
-    failed = 0
-    row_lookup = {row["clip_id"]: row for row in rows if row.get("clip_id")}
-
-    with ThreadPoolExecutor(max_workers=download_workers) as executor:
-        futures = {executor.submit(download_one_row, row): row for row in pending_rows}
-
-        for future in as_completed(futures):
-            row = futures[future]
-            clip_id = row["clip_id"]
-
-            try:
-                result_clip_id, ok, err, saved_path = future.result()
-            except Exception as exc:
-                ok = False
-                err = str(exc)
+            pending_rows = []
+            already_downloaded = 0
+            for row in rows:
                 saved_path = row["saved_path"]
-                result_clip_id = clip_id
-
-            manifest_row = row_lookup[result_clip_id]
-            attempts = int(manifest_row.get("attempts", "0") or "0") + 1
-            manifest_row["attempts"] = str(attempts)
-
-            if ok:
-                manifest_row["status"] = "downloaded"
-                manifest_row["error"] = ""
-                completed += 1
-                print(f"[OK]   {result_clip_id} -> {saved_path}")
-            else:
-                manifest_row["status"] = "failed"
-                manifest_row["error"] = err
-                failed += 1
-                print(f"[FAIL] {result_clip_id} -> {err}")
+                if saved_path and os.path.exists(saved_path):
+                    row["status"] = "downloaded"
+                    row["error"] = ""
+                    already_downloaded += 1
+                    continue
+                if row.get("skip_reason"):
+                    row["status"] = "skipped"
+                    continue
+                if row.get("media_ref") and row.get("clip_id"):
+                    row["status"] = "pending"
+                    pending_rows.append(row)
 
             write_manifest(manifest_path, rows)
+            print(f"Already downloaded on disk: {already_downloaded}")
+            print(f"Pending downloads: {len(pending_rows)}")
+
+            completed = 0
+            failed = 0
+            row_lookup = {row["clip_id"]: row for row in rows if row.get("clip_id")}
+            worker_count = max(1, int(download_workers))
+            for offset in range(0, len(pending_rows), worker_count):
+                batch = pending_rows[offset : offset + worker_count]
+                signed_rows = []
+                for row in batch:
+                    try:
+                        row["download_url"] = sign_media_ref(page, row["media_ref"])
+                        signed_rows.append(row)
+                    except Exception:
+                        row["status"] = "failed"
+                        row["error"] = "pitch video authorization failed"
+                        row["attempts"] = str(int(row.get("attempts", "0") or "0") + 1)
+                        failed += 1
+
+                with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                    futures = {executor.submit(download_one_row, row): row for row in signed_rows}
+                    for future in as_completed(futures):
+                        row = futures[future]
+                        clip_id = row["clip_id"]
+                        try:
+                            result_clip_id, ok, err, saved_path = future.result()
+                        except Exception:
+                            ok = False
+                            err = "pitch video download failed"
+                            saved_path = row["saved_path"]
+                            result_clip_id = clip_id
+
+                        manifest_row = row_lookup[result_clip_id]
+                        manifest_row.pop("download_url", None)
+                        attempts = int(manifest_row.get("attempts", "0") or "0") + 1
+                        manifest_row["attempts"] = str(attempts)
+                        if ok:
+                            manifest_row["status"] = "downloaded"
+                            manifest_row["error"] = ""
+                            completed += 1
+                            print(f"[OK]   {result_clip_id}")
+                        else:
+                            manifest_row["status"] = "failed"
+                            manifest_row["error"] = "pitch video download failed"
+                            failed += 1
+                            print(f"[FAIL] {result_clip_id}")
+
+                write_manifest(manifest_path, rows)
+                processed = already_downloaded + completed + failed + discovery["skipped_pitches"]
+                if status_callback is not None:
+                    status_callback(
+                        f"Downloading Duke-catching pitches: {processed} of {len(rows)}",
+                        processed,
+                        len(rows),
+                    )
+        finally:
+            browser.close()
 
     print("\nDone.")
-    print(f"Collected new URLs this run: {collected_this_run}")
+    print(f"Collected new pitch records this run: {collected_this_run}")
     print(f"Downloaded successfully this run: {completed}")
     print(f"Failed this run: {failed}")
     print(f"Manifest: {manifest_path}")

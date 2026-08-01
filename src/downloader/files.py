@@ -74,7 +74,7 @@ def download_with_retries(url: str, filepath: str, retries: int = RETRY_COUNT):
             download_file_once(url, filepath)
             return True, ""
         except Exception as exc:
-            last_err = str(exc)
+            last_err = f"download failed ({type(exc).__name__})"
             try:
                 if os.path.exists(filepath):
                     os.remove(filepath)
@@ -89,11 +89,14 @@ def download_with_retries(url: str, filepath: str, retries: int = RETRY_COUNT):
 
 def download_one_row(row):
     clip_id = row["clip_id"]
-    s3_url = row["s3_url"]
+    download_url = row.get("download_url") or row.get("s3_url") or ""
     saved_path = row["saved_path"]
 
     if os.path.exists(saved_path):
         return clip_id, True, "", saved_path
 
-    ok, err = download_with_retries(s3_url, saved_path, retries=RETRY_COUNT)
+    if not download_url:
+        return clip_id, False, "pitch video authorization is unavailable", saved_path
+
+    ok, err = download_with_retries(download_url, saved_path, retries=RETRY_COUNT)
     return clip_id, ok, err, saved_path

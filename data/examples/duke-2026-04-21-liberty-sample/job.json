@@ -10,6 +10,12 @@
     "trumedia_url": ""
   },
   "status": "complete",
+  "source": "example",
+  "pitch_scope": "sample_fixture",
+  "provider_metadata": {
+    "provider": "checked-in sample",
+    "live_trumedia_fields_available": false
+  },
   "message": "Sample detection run with 5 pitches",
   "result_count": 5,
   "results": [

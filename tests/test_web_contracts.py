@@ -14,6 +14,7 @@ class WebContractTests(unittest.TestCase):
         self.assertIn('href="#/games"', index)
         self.assertIn('href="#/runs"', index)
         self.assertIn('aria-live="polite"', index)
+        self.assertIn('id="trumediaButton"', index)
         self.assertIn("Skip to content", index)
 
     def test_frontend_monitors_visibility_and_avoids_inner_html(self):
@@ -22,6 +23,8 @@ class WebContractTests(unittest.TestCase):
         self.assertIn("schedulePoll", script)
         self.assertIn("Export to GameTracker", script)
         self.assertIn("Connect TruMedia", script)
+        self.assertIn("Revalidate current", script)
+        self.assertIn("python src/trumedia_auth.py", script)
         self.assertIn("retain_sources", script)
         self.assertNotIn("innerHTML", script)
 
