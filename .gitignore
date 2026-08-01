@@ -10,9 +10,13 @@ venv/
 
 # Generated/downloaded project data
 data/auth/
+data/cache/
 data/raw/downloads/
 data/processed/
 data/runs/
+data/tmp/
+data/**/*.part
+data/**/*.lock
 *.mp4
 data/examples/*
 !data/examples/duke-2026-04-21-liberty-sample/
