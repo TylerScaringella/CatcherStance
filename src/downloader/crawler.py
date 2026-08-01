@@ -88,26 +88,12 @@ def scroll_viewport(page):
 
 
 def get_logged_in_context(browser, start_url=START_URL, storage_state_path=STORAGE_STATE_PATH):
-    if os.path.exists(storage_state_path):
-        context = browser.new_context(storage_state=storage_state_path, accept_downloads=False)
-        page = context.new_page()
-        page.goto(start_url, wait_until="domcontentloaded")
-        return context, page, False
-
-    context = browser.new_context(accept_downloads=False)
+    if not os.path.exists(storage_state_path):
+        raise RuntimeError("TruMedia authentication is required")
+    context = browser.new_context(storage_state=storage_state_path, accept_downloads=False)
     page = context.new_page()
     page.goto(start_url, wait_until="domcontentloaded")
-    Path(storage_state_path).parent.mkdir(parents=True, exist_ok=True)
-
-    input(
-        "\nNo saved Playwright session found.\n"
-        "Log in, complete email verification, navigate to the page with the pitch cards,\n"
-        "then press Enter to save the session and continue..."
-    )
-
-    context.storage_state(path=storage_state_path)
-    print(f"Saved authenticated session to: {storage_state_path}")
-    return context, page, True
+    return context, page, False
 
 
 def ensure_grid_loaded(page):

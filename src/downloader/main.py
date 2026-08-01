@@ -30,25 +30,17 @@ def run_download_pipeline(
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
-        context, page, new_login = get_logged_in_context(
+        context, page, _ = get_logged_in_context(
             browser,
             start_url=start_url,
             storage_state_path=storage_state_path,
         )
 
-        if not new_login:
-            print(f"Using saved Playwright session: {storage_state_path}")
-            print(
-                "If the session is expired, log in manually in the opened browser tab,\n"
-                "then press Enter to refresh the saved state and continue."
-            )
-            try:
-                ensure_grid_loaded(page)
-            except Exception:
-                input("Session may be expired. Log in manually and navigate to the pitch cards page, then press Enter...")
-                context.storage_state(path=storage_state_path)
-                print(f"Updated saved authenticated session: {storage_state_path}")
-                ensure_grid_loaded(page)
+        print(f"Using saved Playwright session: {storage_state_path}")
+        try:
+            ensure_grid_loaded(page)
+        except Exception as exc:
+            raise RuntimeError("TruMedia session is expired or the pitch grid is unavailable") from exc
 
         collected_this_run = collect_s3_urls(page, rows, by_clip_id, by_s3_url, download_dir=download_dir)
         write_manifest(manifest_path, rows)

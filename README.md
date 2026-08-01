@@ -14,13 +14,17 @@ After completing the environment setup, run the web app from the project root:
 python src/app.py
 ```
 
-Then open `http://127.0.0.1:8000`, select a Duke Baseball game, and run the detection pipeline. The app downloads available pitch videos, processes each clip through catcher detection and stance classification, and writes results to `data/runs/<run-id>/detections.csv`, `detections.json`, `pitch_features.csv`, and `video_manifest.csv`.
+Then open `http://127.0.0.1:8000`. The Games workspace loads Duke's official completed-game schedule for the selected season, joins each game to prior analysis runs, and starts the TruMedia-to-detection workflow without requiring analysts to paste media URLs.
+
+New live runs require `CATCHER_STANCE_ADMIN_TOKEN` and an uploaded Playwright storage-state export. Existing results and the checked-in sample remain available without TruMedia access.
 
 The refreshed interface has three linkable work areas:
 
 - `#/games`: choose a game and start, resume, or review a run
 - `#/runs`: monitor queued and active work while continuing to use the app
 - `#/results/<run-id>`: review stance totals, quality flags, timing, votes, and video
+
+The season selector defaults to 2026 and is ready for 2027. Completed games can be filtered by opponent, date, site, conference status, result, and analysis status. TruMedia games are matched by date and normalized opponent; ambiguous matches require explicit confirmation.
 
 Run progress is persisted on disk and refreshed when the browser regains focus, so
 switching views, changing browser tabs, or reloading does not detach the job.
@@ -83,6 +87,28 @@ The API resolves media from server-owned manifests and rejects traversal,
 absolute-path escapes, and symlink escapes. `data/examples/` is always read-only.
 Authentication state, runtime caches, temporary files, live runs, and external
 model weights are ignored by Git.
+
+## TruMedia And Media Lifecycle
+
+TruMedia credentials are never entered into the application. Export a browser session on a trusted workstation:
+
+```bash
+python src/trumedia_auth.py
+```
+
+Start the app with deployment secrets, unlock the protected integration screen, and upload the generated JSON:
+
+```bash
+export CATCHER_STANCE_ADMIN_TOKEN='replace-with-a-long-random-value'
+export CATCHER_STANCE_SECRET_KEY='replace-with-an-independent-random-value'
+python src/app.py
+```
+
+The server validates the state in isolated headless Chromium before atomically installing it with owner-only permissions. Container deployments must mount `data/auth/` as a private writable volume and terminate TLS before Flask.
+
+Downloads use atomic `.part` promotion and resumable manifests. Full source clips are removed by default only after detections and compact review MP4s validate. Select **Retain full source clips** before starting when complete pitch clips are required. Failed or interrupted runs retain downloads for resumption.
+
+The GameTracker dialog is an interactive prototype. It validates a Google Sheets URL and simulates tab selection and export, but it does not contact Google or persist spreadsheet settings.
 
 ## Video Links
 

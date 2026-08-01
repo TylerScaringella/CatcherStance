@@ -1,4 +1,15 @@
-import { apiUrl, getRuns, getSchedule, startRun } from "./api.js";
+import {
+  apiUrl,
+  confirmTruMediaMatch,
+  getRuns,
+  getSchedule,
+  getSeasons,
+  getTruMediaStatus,
+  reprocessRun,
+  startRun,
+  unlockAdmin,
+  uploadTruMediaSession,
+} from "./api.js";
 import {
   badge,
   clear,
@@ -9,13 +20,24 @@ import {
   statusLabel,
 } from "./dom.js";
 
-const ACTIVE = new Set(["queued", "running", "downloading", "detecting", "finalizing"]);
+const ACTIVE = new Set([
+  "queued", "running", "resolving_game", "discovering_pitches", "downloading",
+  "detecting", "building_review", "cleaning_up", "finalizing",
+]);
 const state = {
   schedule: null,
   runs: [],
   selectedGameId: null,
   gameSearch: "",
   gameFilter: "all",
+  siteFilter: "all",
+  resultFilter: "all",
+  conferenceFilter: "all",
+  dateFrom: "",
+  dateTo: "",
+  season: 2026,
+  seasons: [2026],
+  trumedia: { status: "missing", connected: false },
   resultSearch: "",
   stanceFilter: "all",
   qualityFilter: "all",
@@ -33,6 +55,8 @@ const liveRegion = document.querySelector("#liveRegion");
 const toastRegion = document.querySelector("#toastRegion");
 const pitchDialog = document.querySelector("#pitchDialog");
 const pitchDialogContent = document.querySelector("#pitchDialogContent");
+const workflowDialog = document.querySelector("#workflowDialog");
+const workflowDialogContent = document.querySelector("#workflowDialogContent");
 
 function route() {
   const parts = (location.hash || "#/games").slice(2).split("/").filter(Boolean);
@@ -62,6 +86,111 @@ function toast(message, variant = "info") {
   const item = element("div", { className: `toast toast-${variant}`, text: message });
   toastRegion.append(item);
   window.setTimeout(() => item.remove(), 4200);
+}
+
+function closeWorkflow() {
+  if (workflowDialog.open) workflowDialog.close();
+}
+
+function workflowHeader(kicker, title, description) {
+  return element("header", { className: "dialog-header" }, [
+    element("div", {}, [
+      element("p", { className: "eyebrow", text: kicker }),
+      element("h2", { id: "workflowDialogTitle", text: title }),
+      element("p", { className: "muted", text: description }),
+    ]),
+    element("button", {
+      className: "icon-button", type: "button", "aria-label": "Close dialog", text: "×",
+      on: { click: closeWorkflow },
+    }),
+  ]);
+}
+
+function openAuthentication(game, container, reprocess = false) {
+  const token = element("input", { type: "password", autocomplete: "current-password", placeholder: "Admin token", "aria-label": "Admin token" });
+  const file = element("input", { type: "file", accept: "application/json,.json", "aria-label": "Playwright storage-state JSON" });
+  const status = element("p", { className: "form-status", text: "Unlock this protected action, then upload an exported Playwright session." });
+  const submit = element("button", {
+    className: "button primary", type: "button", text: "Validate session",
+    on: { click: async () => {
+      if (!token.value || !file.files?.[0]) {
+        status.textContent = "An admin token and storage-state JSON file are required.";
+        return;
+      }
+      submit.disabled = true;
+      submit.textContent = "Validating headless session…";
+      status.textContent = "The session is being checked against TruMedia. Credentials never enter the schedule or run data.";
+      try {
+        await unlockAdmin(token.value);
+        state.trumedia = await uploadTruMediaSession(file.files[0]);
+        toast("TruMedia session connected.", "success");
+        closeWorkflow();
+        await submitRun(game, container, reprocess);
+      } catch (error) {
+        status.textContent = error.message;
+        submit.disabled = false;
+        submit.textContent = "Try again";
+      }
+    } },
+  });
+  clear(workflowDialogContent).append(
+    workflowHeader("Secure integration", "Connect TruMedia", "Upload a Playwright storage-state export for headless processing."),
+    element("div", { className: "workflow-body" }, [
+      element("div", { className: "security-note" }, [
+        element("strong", { text: "Bearer credential" }),
+        element("span", { text: "The uploaded file is encrypted in transit when deployed behind HTTPS and stored with owner-only permissions." }),
+      ]),
+      element("label", { className: "field" }, [element("span", { text: "Admin token" }), token]),
+      element("label", { className: "field" }, [element("span", { text: "Playwright session JSON" }), file]),
+      status,
+      element("div", { className: "dialog-actions" }, [
+        element("button", { className: "button ghost", type: "button", text: "Cancel", on: { click: closeWorkflow } }),
+        submit,
+      ]),
+    ]),
+  );
+  workflowDialog.showModal();
+}
+
+function openMatchSelection(game, candidates, container, reprocess = false) {
+  let selected = candidates[0]?.id || "";
+  const options = candidates.map((candidate, index) => element("label", { className: "candidate-card" }, [
+    element("input", {
+      type: "radio", name: "candidate", value: candidate.id, checked: index === 0,
+      on: { change: () => { selected = candidate.id; } },
+    }),
+    element("span", {}, [
+      element("strong", { text: candidate.opponent || "TruMedia game" }),
+      element("small", { text: formatDate(candidate.date) }),
+    ]),
+  ]));
+  const confirm = element("button", {
+    className: "button primary", type: "button", text: "Use selected game", disabled: !selected,
+    on: { click: async () => {
+      confirm.disabled = true;
+      confirm.textContent = "Confirming…";
+      try {
+        await confirmTruMediaMatch(game.id, selected);
+        closeWorkflow();
+        await submitRun(game, container, reprocess);
+      } catch (error) {
+        toast(error.message, "danger");
+        confirm.disabled = false;
+        confirm.textContent = "Try again";
+      }
+    } },
+  });
+  clear(workflowDialogContent).append(
+    workflowHeader("Match required", "Choose the TruMedia game", "The schedule match was not unique. Confirm the exact game before downloading pitches."),
+    element("div", { className: "workflow-body" }, [
+      element("div", { className: "candidate-list" }, options.length ? options : [element("p", { className: "empty-state", text: "No candidates were found for this date." })]),
+      element("div", { className: "dialog-actions" }, [
+        element("button", { className: "button ghost", type: "button", text: "Cancel", on: { click: closeWorkflow } }),
+        confirm,
+      ]),
+    ]),
+  );
+  workflowDialog.showModal();
 }
 
 function updateChrome() {
@@ -150,7 +279,12 @@ function renderGames() {
       (state.gameFilter === "complete" && run?.status === "complete") ||
       (state.gameFilter === "active" && run && ACTIVE.has(run.status)) ||
       (state.gameFilter === "not-run" && !run);
-    return matchesText && matchesStatus;
+    const matchesSite = state.siteFilter === "all" || game.site === state.siteFilter;
+    const matchesResult = state.resultFilter === "all" || game.result?.startsWith(state.resultFilter);
+    const matchesConference = state.conferenceFilter === "all" || String(game.conference) === state.conferenceFilter;
+    const matchesFrom = !state.dateFrom || game.date >= state.dateFrom;
+    const matchesTo = !state.dateTo || game.date <= state.dateTo;
+    return matchesText && matchesStatus && matchesSite && matchesResult && matchesConference && matchesFrom && matchesTo;
   });
   const game = games.find((item) => item.id === state.selectedGameId) || filtered[0];
   const run = game ? latestRunForGame(game.id) : null;
@@ -172,18 +306,48 @@ function renderGames() {
     "aria-label": "Filter games",
     on: { change: (event) => { state.gameFilter = event.target.value; renderGames(); } },
   }, [
-    ["all", "All games"], ["complete", "Completed"], ["active", "Active"], ["not-run", "Not run"],
+    ["all", "All games"], ["complete", "Analyzed"], ["active", "Active"], ["not-run", "Not analyzed"],
   ].map(([value, text]) => element("option", { value, text, selected: state.gameFilter === value })));
 
   const section = element("section", { className: "page" });
+  const seasonSelect = element("select", {
+    className: "season-select", "aria-label": "Schedule season",
+    on: { change: async (event) => {
+      const previousSeason = state.season;
+      state.season = Number(event.target.value);
+      state.selectedGameId = null;
+      try {
+        state.schedule = await getSchedule(state.season);
+        renderGames();
+      } catch (error) {
+        state.season = previousSeason;
+        toast(error.message, "danger");
+        renderGames();
+      }
+    } },
+  }, state.seasons.map((year) => element("option", { value: year, text: `${year} season`, selected: year === state.season })));
   section.append(pageHeader(
-    "2026 Duke Baseball",
+    `${state.season} Duke Baseball`,
     "Game workspace",
-    "Start a run, follow its progress, and move directly into pitch-level review.",
+    "Search completed games, connect them to TruMedia, and move directly into pitch-level review.",
+    [seasonSelect],
   ));
   const layout = element("div", { className: "games-layout" });
   const rail = element("aside", { className: "schedule-panel", "aria-label": "Game schedule" }, [
     element("div", { className: "panel-toolbar" }, [search, filter]),
+    element("details", { className: "filter-drawer" }, [
+      element("summary", { text: "More filters" }),
+      element("div", { className: "filter-grid" }, [
+        element("select", { "aria-label": "Filter by site", on: { change: (event) => { state.siteFilter = event.target.value; renderGames(); } } },
+          [["all", "All sites"], ["home", "Home"], ["away", "Away"], ["neutral", "Neutral"]].map(([value, text]) => element("option", { value, text, selected: state.siteFilter === value }))),
+        element("select", { "aria-label": "Filter by result", on: { change: (event) => { state.resultFilter = event.target.value; renderGames(); } } },
+          [["all", "Wins and losses"], ["W", "Wins"], ["L", "Losses"]].map(([value, text]) => element("option", { value, text, selected: state.resultFilter === value }))),
+        element("select", { "aria-label": "Filter by conference", on: { change: (event) => { state.conferenceFilter = event.target.value; renderGames(); } } },
+          [["all", "All opponents"], ["true", "Conference"], ["false", "Non-conference"]].map(([value, text]) => element("option", { value, text, selected: state.conferenceFilter === value }))),
+        element("input", { type: "date", value: state.dateFrom, "aria-label": "Games from date", on: { change: (event) => { state.dateFrom = event.target.value; renderGames(); } } }),
+        element("input", { type: "date", value: state.dateTo, "aria-label": "Games through date", on: { change: (event) => { state.dateTo = event.target.value; renderGames(); } } }),
+      ]),
+    ]),
     element("div", { className: "schedule-list" },
       filtered.length ? filtered.map(gameCard) : [element("div", { className: "empty-state", text: "No games match these filters." })]),
   ]);
@@ -193,7 +357,13 @@ function renderGames() {
     detail.append(element("div", { className: "empty-state", text: "Select a game to continue." }));
   } else {
     const runAction = run?.status === "complete"
-      ? element("a", { className: "button primary", href: `#/results/${run.id}`, text: "Review results" })
+      ? element("div", { className: "hero-actions" }, [
+          element("a", { className: "button primary", href: `#/results/${run.id}`, text: "Review results" }),
+          ...(!run.read_only ? [element("button", {
+            className: "button hero-secondary", type: "button", text: "Reprocess",
+            on: { click: () => submitRun(game, detail, true) },
+          })] : []),
+        ])
       : element("button", {
           className: "button primary",
           type: "button",
@@ -224,23 +394,25 @@ function renderGames() {
       ]));
     }
     const advanced = element("details", { className: "advanced-settings" }, [
-      element("summary", { text: "Run settings" }),
+      element("summary", { text: "Storage settings" }),
       element("div", { className: "settings-grid" }, [
-        element("label", {}, [
-          element("span", { text: "TruMedia game or pitch-card URL" }),
-          element("input", {
-            id: "trumediaUrl",
-            type: "url",
-            value: game.trumedia_url || "https://duke-ncaabaseball.trumedianetworks.com/baseball/",
-          }),
-        ]),
         element("label", { className: "check-row" }, [
-          element("input", { id: "forceRedownload", type: "checkbox" }),
-          element("span", { text: "Force a fresh download instead of resuming" }),
+          element("input", { id: "retainSources", type: "checkbox" }),
+          element("span", { text: "Retain full source clips after compact reviews are created" }),
         ]),
+        element("p", { className: "muted", text: "By default, full downloads are removed only after results and review clips validate." }),
       ]),
     ]);
     if (!run?.read_only) detail.append(advanced);
+    if (!run?.read_only) {
+      detail.append(element("div", { className: `integration-strip ${state.trumedia.connected ? "connected" : "needs-auth"}` }, [
+        element("span", { className: "integration-dot", "aria-hidden": "true" }),
+        element("div", {}, [
+          element("strong", { text: state.trumedia.connected ? "TruMedia session configured" : "TruMedia session required" }),
+          element("small", { text: state.trumedia.connected ? "Automatic matching is ready; ambiguous games require confirmation." : "Upload a protected Playwright session before downloading." }),
+        ]),
+      ]));
+    }
     if (run?.read_only) {
       detail.append(element("div", { className: "callout" }, [
         element("strong", { text: "Checked-in sample" }),
@@ -253,20 +425,33 @@ function renderGames() {
   clear(content).append(section);
 }
 
-async function submitRun(game, container) {
-  const button = container.querySelector(".button.primary");
-  const url = container.querySelector("#trumediaUrl")?.value;
-  const force = container.querySelector("#forceRedownload")?.checked || false;
+async function submitRun(game, container, reprocess = false) {
+  const button = container.querySelector(reprocess ? ".hero-secondary" : ".button.primary");
+  const retainSources = container.querySelector("#retainSources")?.checked || false;
   button.disabled = true;
   button.textContent = "Starting…";
   try {
-    const run = await startRun({ game_id: game.id, trumedia_url: url, force_redownload: force });
+    const run = reprocess
+      ? await reprocessRun(game.id, { retain_sources: retainSources })
+      : await startRun({ game_id: game.id, retain_sources: retainSources });
     state.runs = [run, ...state.runs.filter((item) => item.id !== run.id)];
     liveRegion.textContent = `Run started for ${game.opponent}`;
     toast("Run started. You can continue using the application.", "success");
     location.hash = "#/runs";
     schedulePoll(500);
   } catch (error) {
+    if (error.code === "auth_required") {
+      button.disabled = false;
+      button.textContent = "Connect TruMedia";
+      openAuthentication(game, container, reprocess);
+      return;
+    }
+    if (error.code === "match_required") {
+      button.disabled = false;
+      button.textContent = "Choose TruMedia game";
+      openMatchSelection(game, error.candidates || [], container, reprocess);
+      return;
+    }
     toast(error.message, "danger");
     button.disabled = false;
     button.textContent = "Try again";
@@ -308,7 +493,9 @@ function renderRuns() {
         : element("p", { className: "run-message", text: run.message || statusLabel(run.status) }),
       element("div", { className: "run-facts" }, [
         element("span", { text: `${run.result_count || 0} results` }),
-        element("span", { text: `${run.manifest?.downloaded || 0}/${run.manifest?.total || 0} clips` }),
+        element("span", { text: `${(run.manifest?.downloaded || 0) + (run.manifest?.cleaned || 0)}/${run.manifest?.total || 0} clips processed` }),
+        ...(run.revision ? [element("span", { text: `Revision ${run.revision}` })] : []),
+        ...(run.cleanup?.status ? [element("span", { text: `Storage: ${statusLabel(run.cleanup.status)}` })] : []),
         element("span", { text: run.read_only ? "Read-only fixture" : "Live run" }),
       ]),
       run.status === "complete"
@@ -360,6 +547,63 @@ function resultRow(row, run) {
   ]);
 }
 
+function openGameTracker(run) {
+  const sheetUrl = element("input", { type: "url", placeholder: "https://docs.google.com/spreadsheets/d/…", "aria-label": "Google Sheets link" });
+  const tab = element("select", { disabled: true, "aria-label": "GameTracker sheet tab" }, [element("option", { text: "Connect a sheet first" })]);
+  const connectStatus = element("p", { className: "form-status", text: "Prototype only: no request will be sent to Google." });
+  const exportButton = element("button", { className: "button sheets-button", type: "button", text: "Simulate export", disabled: true });
+  const connectButton = element("button", {
+    className: "button secondary", type: "button", text: "Preview sheet tabs",
+    on: { click: () => {
+      if (!/^https:\/\/docs\.google\.com\/spreadsheets\/d\/[A-Za-z0-9_-]+/.test(sheetUrl.value)) {
+        connectStatus.textContent = "Enter a valid Google Sheets URL to continue.";
+        return;
+      }
+      connectButton.disabled = true;
+      connectButton.textContent = "Loading simulated tabs…";
+      connectStatus.textContent = "Demonstrating the future tab-discovery step. No network request is being made.";
+      window.setTimeout(() => {
+        tab.replaceChildren(...["GameTracker", "Pitch Log", "Catcher Review"].map((name) => element("option", { value: name, text: name })));
+        tab.disabled = false;
+        exportButton.disabled = false;
+        connectButton.textContent = "Tabs previewed";
+      }, 650);
+    } },
+  });
+  exportButton.addEventListener("click", () => {
+    exportButton.disabled = true;
+    exportButton.textContent = "Simulating…";
+    window.setTimeout(() => {
+      connectStatus.textContent = `Simulation complete: ${run.result_count || 0} pitches would be sent to “${tab.value}”. No data was written.`;
+      exportButton.textContent = "Simulation complete";
+    }, 700);
+  });
+  clear(workflowDialogContent).append(
+    workflowHeader("GameTracker prototype", "Export to GameTracker", "Preview the planned Google Sheets workflow before the integration is enabled."),
+    element("div", { className: "prototype-banner" }, [
+      element("strong", { text: "Simulation" }),
+      element("span", { text: "This dialog does not read, store, or modify a Google Sheet." }),
+    ]),
+    element("div", { className: "workflow-body" }, [
+      element("label", { className: "field" }, [element("span", { text: "Google Sheet link" }), sheetUrl]),
+      connectButton,
+      element("label", { className: "field" }, [element("span", { text: "Exact destination tab" }), tab]),
+      element("fieldset", { className: "option-fieldset" }, [
+        element("legend", { text: "Write mode" }),
+        element("label", { className: "check-row" }, [element("input", { type: "radio", name: "write-mode", checked: true }), element("span", { text: "Append pitch rows" })]),
+        element("label", { className: "check-row" }, [element("input", { type: "radio", name: "write-mode" }), element("span", { text: "Replace this game's rows" })]),
+      ]),
+      element("label", { className: "check-row auto-export" }, [element("input", { type: "checkbox" }), element("span", { text: "Automatically export after future completed runs" })]),
+      connectStatus,
+      element("div", { className: "dialog-actions" }, [
+        element("button", { className: "button ghost", type: "button", text: "Close", on: { click: closeWorkflow } }),
+        exportButton,
+      ]),
+    ]),
+  );
+  workflowDialog.showModal();
+}
+
 function renderResults(runId) {
   const run = state.runs.find((item) => item.id === runId);
   if (!run) {
@@ -386,6 +630,7 @@ function renderResults(runId) {
     `${run.game?.opponent || "Run"} results`,
     `${formatDate(run.game?.date)} · ${run.result_count} pitch-level classifications`,
     [
+      element("button", { className: "button sheets-button", type: "button", text: "Export to GameTracker", on: { click: () => openGameTracker(run) } }),
       element("a", { className: "button ghost", href: apiUrl(`/api/results/${run.id}/json`), text: "JSON", download: "" }),
       element("a", { className: "button secondary", href: apiUrl(`/api/results/${run.id}/csv`), text: "Export CSV", download: "" }),
     ],
@@ -450,13 +695,13 @@ function openPitch(run, row) {
   const overlayUrl = apiUrl(`/api/runs/${encodeURIComponent(run.id)}/clips/${encodeURIComponent(row.clip_id)}/overlay.mjpg`);
   const video = element("video", { controls: "", preload: "metadata", src: sourceUrl });
   video.addEventListener("loadedmetadata", () => {
-    if (Number.isFinite(Number(row.window_start_seconds))) video.currentTime = Number(row.window_start_seconds);
+    if (row.media_mode !== "review" && Number.isFinite(Number(row.window_start_seconds))) video.currentTime = Number(row.window_start_seconds);
   }, { once: true });
   const media = element("div", { className: "pitch-media" }, [video]);
   const sourceButton = element("button", {
     className: "segmented active",
     type: "button",
-    text: "Source clip",
+    text: row.media_mode === "review" ? "Compact review" : "Source clip",
   });
   const overlayButton = element("button", {
     className: "segmented",
@@ -540,9 +785,13 @@ function render() {
 
 async function refresh(announce = false) {
   try {
-    const [schedule, runsPayload] = await Promise.all([getSchedule(), getRuns()]);
+    const [schedule, runsPayload, seasonsPayload, trumedia] = await Promise.all([
+      getSchedule(state.season), getRuns(), getSeasons(), getTruMediaStatus(),
+    ]);
     state.schedule = schedule;
     state.runs = runsPayload.runs || [];
+    state.seasons = seasonsPayload.seasons || [2026];
+    state.trumedia = trumedia;
     state.connected = true;
     state.lastUpdated = new Date();
     state.pollFailures = 0;
@@ -574,6 +823,10 @@ activityButton.addEventListener("click", () => { location.hash = "#/runs"; });
 pitchDialog.addEventListener("close", () => clear(pitchDialogContent));
 pitchDialog.addEventListener("click", (event) => {
   if (event.target === pitchDialog) pitchDialog.close();
+});
+workflowDialog.addEventListener("close", () => clear(workflowDialogContent));
+workflowDialog.addEventListener("click", (event) => {
+  if (event.target === workflowDialog) workflowDialog.close();
 });
 
 refresh(false);

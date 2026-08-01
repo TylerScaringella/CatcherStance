@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import os
+import tempfile
+from pathlib import Path
 
 MANIFEST_FIELDS = [
     "card_dom_index",
@@ -42,10 +44,29 @@ def load_manifest(path: str):
 
 
 def write_manifest(path: str, rows):
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=MANIFEST_FIELDS)
-        writer.writeheader()
-        writer.writerows(rows)
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            newline="",
+            encoding="utf-8",
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".part",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            writer = csv.DictWriter(handle, fieldnames=MANIFEST_FIELDS)
+            writer.writeheader()
+            writer.writerows(rows)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def upsert_manifest_row(rows, by_clip_id, by_s3_url, row):

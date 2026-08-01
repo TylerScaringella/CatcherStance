@@ -18,6 +18,8 @@ def run_game_detection(
     manifest_path = run_dir / "video_manifest.csv"
     storage_state_path = PLAYWRIGHT_STATE_PATH
 
+    if status_callback is not None:
+        status_callback("Discovering TruMedia pitch videos", None, None)
     run_download_pipeline(
         start_url=start_url,
         download_dir=str(download_dir),
