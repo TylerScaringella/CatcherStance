@@ -94,8 +94,8 @@ For containers, mount `data/auth/` as a private writable volume. Provide both se
 4. Confirm that the header reports `TruMedia ready`.
 5. Click `Start Detection`. The server resolves the game from TruMedia Scores.
 6. For a doubleheader, confirm the exact game only when game number, opponent, and result do not produce one unambiguous match.
-7. Wait for pitch discovery, downloading, detection, and completion.
-8. Review the Duke-catching pitch results.
+7. Monitor the independent discovery, download, detection, and compact-review stages.
+8. Review available Duke-catching pitches while the remaining pitches continue.
 9. Use `Export CSV` or `Export JSON` to save the predictions.
 10. Open a pitch row to view its source or compact review clip and optional pose overlay.
 
@@ -118,10 +118,30 @@ Important output files:
 - `detections.csv`: pitch-level stance predictions in table format
 - `detections.json`: pitch-level stance predictions in JSON format
 - `job.json`: saved app job status and metadata
+- `state/pitches/`: atomic internal per-pitch records used for restart-safe resume
 - `downloads/`: downloaded pitch-by-pitch video clips
 - `artifacts/`: durable generated diagnostics and reusable run-specific assets
 
 The default storage policy creates `artifacts/review-<clip-id>.mp4`, validates every review, and then removes full source downloads. Enable **Retain full source clips** before starting to preserve them. Cleanup failure never deletes source clips.
+
+CSV and JSON exports remain unavailable until final aggregation completes. Partial
+results are read from the internal per-pitch state through the run-detail API; they
+are not duplicated inside `job.json`.
+
+## Performance Configuration
+
+The balanced defaults share resources across every live run:
+
+```bash
+export CATCHER_STANCE_DOWNLOAD_WORKERS=8
+export CATCHER_STANCE_INFERENCE_WORKERS=1
+export CATCHER_STANCE_REVIEW_WORKERS=1
+```
+
+Keep inference at one worker on Apple MPS unless a target-specific benchmark proves
+otherwise. Multiple games can prepare downloads concurrently, but they receive the
+accelerator in FIFO order. The app remains responsive because run polling is summary-only,
+conditional, paused in hidden tabs, and applied through targeted DOM updates.
 
 Temporary processing files are created under `data/tmp/<run-id>-*` and removed
 after success or failure. Refreshed schedule data is stored in `data/cache/`
@@ -186,4 +206,5 @@ Credential-dependent live smoke test:
 1. Upload a fresh TruMedia session.
 2. Select a completed game and verify automatic or confirmed matching.
 3. Monitor discovery, download, detection, review generation, and cleanup in Active Runs.
-4. Confirm CSV/JSON exports, compact replay, storage metadata, and versioned reprocessing.
+4. Open partial results before the run completes and confirm new pitches appear without a page flicker.
+5. Confirm CSV/JSON exports enable only after completion, then verify compact replay, storage metadata, and versioned reprocessing.

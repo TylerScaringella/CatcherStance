@@ -21,6 +21,12 @@ class WebContractTests(unittest.TestCase):
         script = (WEB_DIR / "app.js").read_text(encoding="utf-8")
         self.assertIn("visibilitychange", script)
         self.assertIn("schedulePoll", script)
+        self.assertIn("getRunSummaries", script)
+        self.assertIn("AbortController", script)
+        self.assertIn("3000", script)
+        self.assertIn("30000", script)
+        self.assertIn("patchRunNodes", script)
+        self.assertIn("patchResults", script)
         self.assertIn("Export to GameTracker", script)
         self.assertIn("Connect TruMedia", script)
         self.assertIn("Revalidate current", script)
@@ -41,6 +47,7 @@ class WebContractTests(unittest.TestCase):
             "/api/teams/duke/schedule?season=2026",
             "/api/integrations/trumedia/status",
             "/api/runs",
+            "/api/runs?view=summary",
         ):
             with self.subTest(path=path):
                 response = client.get(path)

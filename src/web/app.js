@@ -1,7 +1,8 @@
 import {
   apiUrl,
   confirmTruMediaMatch,
-  getRuns,
+  getRun,
+  getRunSummaries,
   getSchedule,
   getSeasons,
   getTruMediaStatus,
@@ -25,6 +26,7 @@ const ACTIVE = new Set([
   "queued", "running", "resolving_game", "discovering_pitches", "downloading",
   "detecting", "building_review", "cleaning_up", "finalizing",
 ]);
+const PIPELINE_STAGES = ["discovering_pitches", "downloading", "detecting", "building_review"];
 const state = {
   schedule: null,
   runs: [],
@@ -46,6 +48,9 @@ const state = {
   lastUpdated: null,
   pollFailures: 0,
   timer: null,
+  pollController: null,
+  runsEtag: null,
+  runDetails: new Map(),
 };
 
 const content = document.querySelector("#appContent");
@@ -289,7 +294,23 @@ function progressBar(run) {
   const progress = run.progress || {};
   const percent = Number(progress.percent);
   const determinate = Number.isFinite(percent);
-  return element("div", { className: "run-progress" }, [
+  const stages = progress.stages || {};
+  const elapsed = ACTIVE.has(run.status) && Number(run.created_at)
+    ? Date.now() / 1000 - Number(run.created_at)
+    : Number(run.performance?.elapsed_seconds);
+  const rate = run.performance?.pitches_per_minute == null
+    ? null
+    : Number(run.performance.pitches_per_minute);
+  const eta = run.performance?.eta_seconds == null
+    ? null
+    : Number(run.performance.eta_seconds);
+  const activeStage = progress.active_stage || progress.phase;
+  const facts = [
+    Number.isFinite(elapsed) ? `${Math.floor(elapsed / 60)}m ${Math.round(elapsed % 60)}s elapsed` : null,
+    Number.isFinite(rate) ? `${rate.toFixed(1)} pitches/min` : null,
+    Number.isFinite(eta) ? `about ${Math.max(1, Math.ceil(eta / 60))}m remaining` : null,
+  ].filter(Boolean).join(" · ");
+  return element("div", { className: "run-progress", dataset: { runProgress: run.id } }, [
     element("div", { className: "progress-copy" }, [
       element("span", { text: run.message || statusLabel(run.status) }),
       element("strong", { text: determinate ? `${percent.toFixed(0)}%` : "Working" }),
@@ -301,6 +322,25 @@ function progressBar(run) {
       "aria-valuemax": 100,
       "aria-valuenow": determinate ? percent : undefined,
     }, [element("span", { style: determinate ? `width:${Math.min(100, percent)}%` : "" })]),
+    element("div", { className: "stage-strip", "aria-label": "Pipeline stages" },
+      PIPELINE_STAGES.map((stage) => {
+        const item = stages[stage] || {};
+        const stagePercent = Number(item.percent);
+        const stateName = item.status === "complete" || stagePercent >= 100
+          ? "complete"
+          : activeStage === stage
+            ? "active"
+            : item.current !== undefined
+              ? "started"
+              : "pending";
+        return element("span", { className: `stage-chip ${stateName}` }, [
+          element("i", { "aria-hidden": "true" }),
+          element("span", { text: statusLabel(stage.replace("_pitches", "")) }),
+          ...(Number.isFinite(stagePercent) ? [element("strong", { text: `${stagePercent.toFixed(0)}%` })] : []),
+        ]);
+      }),
+    ),
+    ...(facts ? [element("small", { className: "progress-facts", text: facts })] : []),
   ]);
 }
 
@@ -312,7 +352,9 @@ function runBadge(run) {
       : ACTIVE.has(run.status)
         ? "progress"
         : "neutral";
-  return badge(run.read_only ? "Sample" : statusLabel(run.status), run.read_only ? "sample" : variant);
+  const node = badge(run.read_only ? "Sample" : statusLabel(run.status), run.read_only ? "sample" : variant);
+  node.dataset.runBadge = run.id;
+  return node;
 }
 
 function gameCard(game) {
@@ -320,6 +362,7 @@ function gameCard(game) {
   const selected = state.selectedGameId === game.id;
   return element("button", {
     className: `schedule-card${selected ? " selected" : ""}`,
+    dataset: { gameId: game.id },
     type: "button",
     on: { click: () => { state.selectedGameId = game.id; render(); } },
   }, [
@@ -427,6 +470,11 @@ function renderGames() {
             on: { click: () => submitRun(game, detail, true) },
           })] : []),
         ])
+      : run && ACTIVE.has(run.status) && run.result_count > 0
+        ? element("div", { className: "hero-actions" }, [
+            element("a", { className: "button primary", href: `#/results/${run.id}`, text: `Review ${run.result_count} available` }),
+            element("span", { className: "muted", text: "Processing continues in the background" }),
+          ])
       : element("button", {
           className: "button primary",
           type: "button",
@@ -445,7 +493,7 @@ function renderGames() {
       ]),
       element("div", { className: "score-strip" }, [
         element("span", { text: game.result || "Scheduled" }),
-        element("span", { text: run ? `${run.result_count || 0} pitch results` : "No analysis yet" }),
+        element("span", { text: run ? `${run.result_count || 0} pitch results` : "No analysis yet", dataset: run ? { resultCount: run.id } : undefined }),
         run ? runBadge(run) : badge("Ready to start"),
       ]),
     );
@@ -535,7 +583,7 @@ function renderRuns() {
     "Processing",
     "Run activity",
     "Jobs continue in the background while you review games or completed results.",
-    [element("button", { className: "button ghost", type: "button", text: "Refresh", on: { click: () => refresh(true) } })],
+    [element("button", { className: "button ghost", type: "button", text: "Refresh", on: { click: () => refreshRuns(true, true) } })],
   ));
   const grid = element("div", { className: "runs-grid" });
   if (!runs.length) {
@@ -546,7 +594,7 @@ function renderRuns() {
     ]));
   }
   for (const run of runs) {
-    const card = element("article", { className: `run-card${ACTIVE.has(run.status) ? " active-run" : ""}` }, [
+    const card = element("article", { className: `run-card${ACTIVE.has(run.status) ? " active-run" : ""}`, dataset: { runId: run.id } }, [
       element("div", { className: "run-card-head" }, [
         element("div", {}, [
           element("p", { className: "eyebrow", text: formatDate(run.game?.date) }),
@@ -559,13 +607,13 @@ function renderRuns() {
         ? progressBar(run)
         : element("p", { className: "run-message", text: run.message || statusLabel(run.status) }),
       element("div", { className: "run-facts" }, [
-        element("span", { text: `${run.result_count || 0} results` }),
-        element("span", { text: `${(run.manifest?.downloaded || 0) + (run.manifest?.cleaned || 0)}/${run.manifest?.total || 0} clips processed` }),
+        element("span", { text: `${run.result_count || 0} results`, dataset: { resultCount: run.id } }),
+        element("span", { text: `${(run.manifest?.downloaded || 0) + (run.manifest?.cleaned || 0)}/${run.manifest?.total || 0} clips downloaded` }),
         ...(run.revision ? [element("span", { text: `Revision ${run.revision}` })] : []),
         ...(run.cleanup?.status ? [element("span", { text: `Storage: ${statusLabel(run.cleanup.status)}` })] : []),
         element("span", { text: run.read_only ? "Read-only fixture" : "Live run" }),
       ]),
-      run.status === "complete"
+      run.status === "complete" || run.result_count > 0
         ? element("a", { className: "button secondary", href: `#/results/${run.id}`, text: "Open results" })
         : element("a", { className: "button ghost", href: "#/games", text: "View game" }),
     ]);
@@ -592,11 +640,37 @@ function resultSummary(rows) {
   ];
 }
 
+function metricsGrid(run) {
+  return element("div", { className: "metrics-grid" },
+    resultSummary(run.results || []).map(([label, value, note]) =>
+      element("article", { className: "metric-card" }, [
+        element("span", { text: label }),
+        element("strong", { text: value }),
+        element("small", { text: note }),
+      ]),
+    ),
+  );
+}
+
+function filteredResultRows(run) {
+  const query = state.resultSearch.toLowerCase();
+  return (run.results || []).filter((row) => {
+    const textMatch = `${row.clip_id} ${row.stance} ${row.status}`.toLowerCase().includes(query);
+    const stanceMatch = state.stanceFilter === "all" ||
+      (state.stanceFilter === "abstained" ? !row.accepted : row.stance === state.stanceFilter);
+    const qualityMatch = state.qualityFilter === "all" ||
+      (state.qualityFilter === "flagged" && (row.quality_flags?.length || !row.accepted)) ||
+      (state.qualityFilter === "clear" && row.accepted && !row.quality_flags?.length);
+    return textMatch && stanceMatch && qualityMatch;
+  });
+}
+
 function resultRow(row, run) {
   const stance = row.stance || "Abstained";
   const quality = row.quality_flags?.length ? "Review" : row.accepted ? "Clear" : "Rejected";
   return element("button", {
     className: "result-row",
+    dataset: { clipId: row.clip_id },
     type: "button",
     on: { click: () => openPitch(run, row) },
   }, [
@@ -672,7 +746,7 @@ function openGameTracker(run) {
 }
 
 function renderResults(runId) {
-  const run = state.runs.find((item) => item.id === runId);
+  const run = state.runDetails.get(runId) || state.runs.find((item) => item.id === runId);
   if (!run) {
     clear(content).append(element("section", { className: "page" }, [
       pageHeader("Results", "Run not found", "The requested run is unavailable."),
@@ -680,37 +754,25 @@ function renderResults(runId) {
     ]));
     return;
   }
-  const query = state.resultSearch.toLowerCase();
-  const rows = (run.results || []).filter((row) => {
-    const textMatch = `${row.clip_id} ${row.stance} ${row.status}`.toLowerCase().includes(query);
-    const stanceMatch = state.stanceFilter === "all" ||
-      (state.stanceFilter === "abstained" ? !row.accepted : row.stance === state.stanceFilter);
-    const qualityMatch = state.qualityFilter === "all" ||
-      (state.qualityFilter === "flagged" && (row.quality_flags?.length || !row.accepted)) ||
-      (state.qualityFilter === "clear" && row.accepted && !row.quality_flags?.length);
-    return textMatch && stanceMatch && qualityMatch;
-  });
+  const rows = filteredResultRows(run);
 
   const section = element("section", { className: "page results-page" });
   section.append(pageHeader(
-    run.read_only ? "Sample analysis" : "Completed analysis",
+    run.read_only ? "Sample analysis" : run.results_complete ? "Completed analysis" : "Live analysis",
     `${run.game?.opponent || "Run"} results`,
     `${formatDate(run.game?.date)} · ${run.result_count} pitch-level classifications`,
     [
       element("button", { className: "button sheets-button", type: "button", text: "Export to GameTracker", on: { click: () => openGameTracker(run) } }),
-      element("a", { className: "button ghost", href: apiUrl(`/api/results/${run.id}/json`), text: "JSON", download: "" }),
-      element("a", { className: "button secondary", href: apiUrl(`/api/results/${run.id}/csv`), text: "Export CSV", download: "" }),
+      run.results_complete
+        ? element("a", { className: "button ghost", href: apiUrl(`/api/results/${run.id}/json`), text: "JSON", download: "" })
+        : element("button", { className: "button ghost", type: "button", text: "JSON after completion", disabled: true }),
+      run.results_complete
+        ? element("a", { className: "button secondary", href: apiUrl(`/api/results/${run.id}/csv`), text: "Export CSV", download: "" })
+        : element("button", { className: "button secondary", type: "button", text: "CSV after completion", disabled: true }),
     ],
   ));
-  section.append(element("div", { className: "metrics-grid" },
-    resultSummary(run.results || []).map(([label, value, note]) =>
-      element("article", { className: "metric-card" }, [
-        element("span", { text: label }),
-        element("strong", { text: value }),
-        element("small", { text: note }),
-      ]),
-    ),
-  ));
+  if (!run.results_complete && ACTIVE.has(run.status)) section.append(progressBar(run));
+  section.append(metricsGrid(run));
 
   const search = element("input", {
     id: "resultSearch",
@@ -739,7 +801,7 @@ function renderResults(runId) {
   section.append(element("div", { className: "results-panel" }, [
     element("div", { className: "results-toolbar" }, [
       element("div", { className: "filter-group" }, [search, stance, quality]),
-      element("span", { className: "muted", text: `${rows.length} of ${run.results?.length || 0} pitches` }),
+      element("span", { className: "muted results-visible-count", text: `${rows.length} of ${run.results?.length || 0} pitches` }),
     ]),
     element("div", { className: "result-table-head" }, [
       "Pitch", "Stance", "Confidence", "Set window", "Quality", "",
@@ -850,41 +912,175 @@ function render() {
   else renderGames();
 }
 
-async function refresh(announce = false) {
+function patchRunNodes(run) {
+  document.querySelectorAll(`[data-run-progress="${run.id}"]`).forEach((node) => {
+    node.replaceWith(progressBar(run));
+  });
+  document.querySelectorAll(`[data-run-badge="${run.id}"]`).forEach((node) => {
+    node.replaceWith(runBadge(run));
+  });
+  document.querySelectorAll(`[data-result-count="${run.id}"]`).forEach((node) => {
+    node.textContent = node.closest(".score-strip")
+      ? `${run.result_count || 0} pitch results`
+      : `${run.result_count || 0} results`;
+  });
+  const card = document.querySelector(`[data-run-id="${run.id}"]`);
+  if (card) card.classList.toggle("active-run", ACTIVE.has(run.status));
+}
+
+function patchResults(run) {
+  state.runDetails.set(run.id, run);
+  const current = route();
+  if (current.view !== "results" || current.id !== run.id) return;
+  const oldMetrics = content.querySelector(".metrics-grid");
+  if (oldMetrics) oldMetrics.replaceWith(metricsGrid(run));
+  const list = content.querySelector(".result-list");
+  if (list) {
+    const rows = filteredResultRows(run);
+    const existing = new Set(
+      [...list.querySelectorAll("[data-clip-id]")].map((node) => node.dataset.clipId),
+    );
+    if (rows.length && !existing.size) list.replaceChildren();
+    for (const row of rows) {
+      if (!existing.has(row.clip_id)) list.append(resultRow(row, run));
+    }
+    if (!rows.length) list.replaceChildren(element("div", { className: "empty-state", text: "No pitches match these filters." }));
+    const count = content.querySelector(".results-visible-count");
+    if (count) count.textContent = `${rows.length} of ${run.results?.length || 0} pitches`;
+  }
+  patchRunNodes(run);
+}
+
+async function ensureRunDetail(runId, signal) {
+  const detail = await getRun(runId, signal ? { signal } : undefined);
+  state.runDetails.set(runId, detail);
+  return detail;
+}
+
+function mergeRunSummaries(incoming) {
+  const previous = new Map(state.runs.map((run) => [run.id, run]));
+  const next = incoming || [];
+  const structural = next.length !== state.runs.length || next.some((run) => !previous.has(run.id));
+  const terminalTransition = next.some((run) => {
+    const old = previous.get(run.id);
+    return old && ACTIVE.has(old.status) !== ACTIVE.has(run.status);
+  });
+  state.runs = next;
+  return { previous, structural, terminalTransition };
+}
+
+async function applyRunSummaries(incoming) {
+  const { previous, structural, terminalTransition } = mergeRunSummaries(incoming);
+  updateChrome();
+  const current = route();
+  if (structural || terminalTransition) {
+    if (current.view === "results" && current.id) {
+      try {
+        await ensureRunDetail(current.id);
+      } catch (_) {
+        // The normal render below will show the missing-run state.
+      }
+    }
+    render();
+    return;
+  }
+  for (const run of state.runs) patchRunNodes(run);
+  if (current.view === "results" && current.id) {
+    const summary = state.runs.find((run) => run.id === current.id);
+    const old = previous.get(current.id);
+    if (summary && (!old || summary.result_count !== old.result_count || summary.updated_at !== old.updated_at)) {
+      patchResults(await ensureRunDetail(current.id));
+    }
+  }
+}
+
+async function refreshRuns(announce = false, replaceInFlight = false) {
+  if (state.pollController) {
+    if (!replaceInFlight) return;
+    state.pollController.abort();
+  }
+  const controller = new AbortController();
+  state.pollController = controller;
   try {
-    const [schedule, runsPayload, seasonsPayload, trumedia] = await Promise.all([
-      getSchedule(state.season), getRuns(), getSeasons(), getTruMediaStatus(),
-    ]);
-    state.schedule = schedule;
-    state.runs = runsPayload.runs || [];
-    state.seasons = seasonsPayload.seasons || [2026];
-    state.trumedia = trumedia;
+    const response = await getRunSummaries(state.runsEtag, controller.signal);
+    if (!response.notModified) {
+      state.runsEtag = response.etag;
+      await applyRunSummaries(response.payload.runs || []);
+    } else {
+      for (const run of state.runs) patchRunNodes(run);
+    }
     state.connected = true;
     state.lastUpdated = new Date();
     state.pollFailures = 0;
+    updateChrome();
     if (announce) toast("Run status refreshed.", "success");
-    render();
   } catch (error) {
+    if (error.name === "AbortError") return;
     state.connected = false;
     state.pollFailures += 1;
     updateChrome();
     if (announce) toast(error.message, "danger");
   } finally {
-    schedulePoll();
+    if (state.pollController === controller) {
+      state.pollController = null;
+      schedulePoll();
+    }
   }
 }
 
 function schedulePoll(delay) {
   window.clearTimeout(state.timer);
-  const activeDelay = activeRuns().length ? 2500 : 10000;
+  if (document.visibilityState === "hidden") return;
+  const activeDelay = activeRuns().length ? 3000 : 30000;
   const backoff = Math.min(30000, activeDelay * 2 ** state.pollFailures);
-  state.timer = window.setTimeout(() => refresh(false), delay ?? backoff);
+  state.timer = window.setTimeout(() => refreshRuns(false), delay ?? backoff);
 }
 
-window.addEventListener("hashchange", render);
-window.addEventListener("focus", () => refresh(false));
+async function routeChanged() {
+  const current = route();
+  if (current.view === "results" && current.id) {
+    try {
+      await ensureRunDetail(current.id);
+    } catch (_) {
+      state.runDetails.delete(current.id);
+    }
+  }
+  render();
+}
+
+async function bootstrap() {
+  try {
+    const [schedule, seasonsPayload, trumedia, summaries] = await Promise.all([
+      getSchedule(state.season),
+      getSeasons(),
+      getTruMediaStatus(),
+      getRunSummaries(),
+    ]);
+    state.schedule = schedule;
+    state.seasons = seasonsPayload.seasons || [2026];
+    state.trumedia = trumedia;
+    state.runs = summaries.payload?.runs || [];
+    state.runsEtag = summaries.etag;
+    state.connected = true;
+    state.lastUpdated = new Date();
+    await routeChanged();
+  } catch (error) {
+    state.connected = false;
+    toast(error.message, "danger");
+    render();
+  } finally {
+    schedulePoll();
+  }
+}
+
+window.addEventListener("hashchange", routeChanged);
+window.addEventListener("focus", () => refreshRuns(false, true));
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") refresh(false);
+  if (document.visibilityState === "visible") refreshRuns(false, true);
+  else {
+    window.clearTimeout(state.timer);
+    state.pollController?.abort();
+  }
 });
 activityButton.addEventListener("click", () => { location.hash = "#/runs"; });
 trumediaButton.addEventListener("click", () => openAuthentication());
@@ -897,4 +1093,4 @@ workflowDialog.addEventListener("click", (event) => {
   if (event.target === workflowDialog) workflowDialog.close();
 });
 
-refresh(false);
+bootstrap();

@@ -27,7 +27,11 @@ The refreshed interface has three linkable work areas:
 The season selector defaults to 2026 and is ready for 2027. Completed games can be filtered by opponent, date, site, conference status, result, and analysis status. TruMedia games are resolved from the selected date's Scores dataset using Duke's team ID, opponent, result, and doubleheader game number. Ambiguous matches require explicit confirmation.
 
 Run progress is persisted on disk and refreshed when the browser regains focus, so
-switching views, changing browser tabs, or reloading does not detach the job.
+switching views, changing browser tabs, or reloading does not detach the job. The
+browser polls lightweight run summaries every three seconds while work is active,
+every 30 seconds while idle, and pauses while hidden. Updates patch the existing
+progress elements rather than rebuilding the page, so search focus, dialogs, scroll
+position, and video playback remain stable.
 
 The repository includes a five-pitch sample run from Duke at Liberty on April 21, 2026 in `data/examples/duke-2026-04-21-liberty-sample/`. This lets graders inspect videos, manifests, and stance predictions without TruMedia access.
 
@@ -81,7 +85,9 @@ Production code resolves writable paths through `project_paths.py` and
 `backend/storage.py`; it must not write next to source modules or notebooks.
 Live outputs stay inside their owning `data/runs/<run-id>/` directory, reusable
 artifacts belong in that run's `artifacts/` folder, and incomplete work belongs
-under `data/tmp/`. Writes to job state and detection exports are atomic.
+under `data/tmp/`. Atomic per-pitch resume records live under the owning run's
+`state/pitches/` directory and are consolidated into the normal detection exports
+when processing completes. Writes to job state, resume records, and exports are atomic.
 
 The API resolves media from server-owned manifests and rejects traversal,
 absolute-path escapes, and symlink escapes. `data/examples/` is always read-only.
@@ -111,6 +117,27 @@ The server validates the state in isolated headless Chromium before atomically i
 For each matched game, the downloader reads the complete TruMedia pitch dataset and selects only pitches where Duke (`730336256`) is the catching team. Stable `s3://` media references are stored in the private run manifest; expiring signed AWS URLs are generated in short batches and never persisted. Downloads use atomic `.part` promotion and resumable manifests. Full source clips are removed by default only after detections and compact review MP4s validate. Failed or interrupted runs receive fresh media signatures when resumed.
 
 The GameTracker dialog is an interactive prototype. It validates a Google Sheets URL and simulates tab selection and export, but it does not contact Google or persist spreadsheet settings.
+
+## Throughput And Progress
+
+Downloads, inference, and compact-review generation form a bounded staged pipeline.
+Validated clips enter detection without waiting for the full game to download, and
+completed pitches become reviewable while later pitches continue processing. Multiple
+games may download concurrently, but game-level inference uses a FIFO accelerator lease.
+
+The balanced defaults are eight total download slots, one inference worker, and one
+review encoder. Override them only after benchmarking the target machine:
+
+```bash
+export CATCHER_STANCE_DOWNLOAD_WORKERS=8
+export CATCHER_STANCE_INFERENCE_WORKERS=1
+export CATCHER_STANCE_REVIEW_WORKERS=1
+```
+
+One MPS inference worker is intentional. On the development Apple M3, processing the
+same two clips with competing pitch threads took `61.2s`, compared with `40.5s`
+sequentially. The pipeline gains throughput by overlapping independent stages rather
+than contending for the same accelerator and model objects.
 
 ## Video Links
 
