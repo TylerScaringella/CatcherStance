@@ -119,11 +119,28 @@ class StorageSecurityTests(unittest.TestCase):
                 )
                 self.assertEqual(0, result.returncode)
 
+    def test_pitch_state_paths_are_contained_and_validated(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            storage, "RUNS_DIR", Path(directory)
+        ):
+            path = storage.pitch_state_file("safe-run", "clip-1", create_parent=True)
+            self.assertEqual(
+                (Path(directory) / "safe-run" / "state" / "pitches" / "clip-1.json").resolve(),
+                path,
+            )
+            with self.assertRaises(ValueError):
+                storage.pitch_state_file("safe-run", "../clip", create_parent=True)
+
 
 class RunApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.client = create_app().test_client()
+
+    def test_result_numeric_fields_are_normalized(self):
+        result = jobs.normalize_result({"confidence": "0.75", "valid_frame_count": "12"})
+        self.assertEqual(0.75, result["confidence"])
+        self.assertEqual(12, result["valid_frame_count"])
 
     def test_example_run_is_discoverable_with_correct_results(self):
         response = self.client.get("/api/runs")
@@ -139,6 +156,55 @@ class RunApiTests(unittest.TestCase):
             ["LKD", "LKD", "RKD", "LKD", "LKD"],
             [row["stance"] for row in sample["results"]],
         )
+
+    def test_run_summary_is_lightweight_and_conditional(self):
+        response = self.client.get("/api/runs?view=summary")
+        self.assertEqual(200, response.status_code)
+        sample = next(
+            run
+            for run in response.get_json()["runs"]
+            if run["id"] == "duke-2026-04-21-liberty-sample"
+        )
+        self.assertNotIn("results", sample)
+        self.assertEqual(5, sample["result_count"])
+        etag = response.headers["ETag"]
+        unchanged = self.client.get("/api/runs?view=summary", headers={"If-None-Match": etag})
+        self.assertEqual(304, unchanged.status_code)
+
+    def test_detecting_progress_is_not_replaced_by_download_completion(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            storage, "RUNS_DIR", Path(directory)
+        ), patch.object(jobs, "RUNS_DIR", Path(directory), create=True):
+            run_dir = Path(directory) / "progress-run"
+            run_dir.mkdir(parents=True)
+            (run_dir / "downloads").mkdir()
+            video_path = run_dir / "downloads" / "clip-1.mp4"
+            video_path.write_bytes(b"video")
+            (run_dir / "video_manifest.csv").write_text(
+                f"clip_id,saved_path,status\nclip-1,{video_path},downloaded\n",
+                encoding="utf-8",
+            )
+            payload = {
+                "id": "progress-run",
+                "game": {"id": "game-1", "opponent": "Test", "date": "2026-01-01"},
+                "status": "detecting",
+                "phase": "detecting",
+                "created_at": time.time(),
+                "updated_at": time.time(),
+                "progress": {
+                    "active_stage": "detecting",
+                    "phase": "detecting",
+                    "current": 0,
+                    "total": 1,
+                    "percent": 0,
+                    "stages": {},
+                },
+            }
+            (run_dir / "job.json").write_text(json.dumps(payload), encoding="utf-8")
+            location = storage.RunLocation("progress-run", run_dir, "live", False)
+            hydrated = jobs.job_from_location(location)
+            self.assertEqual("detecting", hydrated["phase"])
+            self.assertEqual(0, hydrated["progress"]["percent"])
 
     def test_stale_embedded_job_results_are_not_returned(self):
         response = self.client.get("/api/runs/duke-2026-04-21-liberty-sample")

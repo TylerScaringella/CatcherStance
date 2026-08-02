@@ -32,3 +32,16 @@ print(result.label, result.confidence, result.quality_flags)
 ```
 
 `LKD` and `RKD` always refer to the catcher's anatomical side.
+
+For multiple clips on one inference worker, reuse initialized components:
+
+```python
+from stance_pipeline import PitchStanceAnalyzer
+
+analyzer = PitchStanceAnalyzer()
+results = [analyzer.analyze(path) for path in clip_paths]
+```
+
+Do not create an unbounded thread per pitch on a single GPU or MPS device. The web
+runner uses one FIFO inference lease and overlaps downloads and compact-review encoding
+around it. Each completed pitch is atomically persisted before the next pitch begins.

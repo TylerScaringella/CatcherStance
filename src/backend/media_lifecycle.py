@@ -92,6 +92,33 @@ def storage_usage(run_id: str) -> dict[str, int]:
     }
 
 
+def build_review_for_result(run_id: str, result: dict) -> Path:
+    location = resolve_run(run_id)
+    if location is None or location.read_only:
+        raise ValueError("review generation requires a writable live run")
+    clip_id = str(result.get("clip_id") or "")
+    rows, _, _ = load_manifest(str(location.path / "video_manifest.csv"))
+    row = next((item for item in rows if item.get("clip_id") == clip_id), None)
+    if row is None:
+        raise RuntimeError("result clip is missing from the manifest")
+    source = resolve_manifest_media(location, str(row.get("saved_path") or ""))
+    if not source.is_file():
+        raise RuntimeError("source clip is missing")
+    artifacts = location.path / "artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    destination = artifacts / f"review-{clip_id}.mp4"
+    if destination.is_file():
+        validate_mp4(str(destination))
+        return destination
+    start, duration = _review_bounds(result)
+    with job_temp_dir(run_id) as temporary_dir:
+        temporary = temporary_dir / destination.name
+        _encode_review(source, temporary, start, duration)
+        with run_lock(run_id):
+            os.replace(temporary, destination)
+    return destination
+
+
 def finalize_run_media(run_id: str, results: list[dict], retain_sources: bool) -> dict:
     location = resolve_run(run_id)
     if location is None or location.read_only:
@@ -105,25 +132,13 @@ def finalize_run_media(run_id: str, results: list[dict], retain_sources: bool) -
 
     try:
         for row in rows:
+            if row.get("status") == "skipped" or row.get("skip_reason"):
+                continue
             clip_id = str(row.get("clip_id") or "")
             result = result_by_clip.get(clip_id)
             if result is None:
                 raise RuntimeError(f"No result metadata exists for clip {clip_id}")
-            source = resolve_manifest_media(location, str(row.get("saved_path") or ""))
-            if not source.is_file():
-                raise RuntimeError(f"Source clip is missing for {clip_id}")
-            destination = artifacts / f"review-{clip_id}.mp4"
-            if destination.is_file():
-                validate_mp4(str(destination))
-                generated.append(destination)
-                continue
-            start, duration = _review_bounds(result)
-            with job_temp_dir(run_id) as temporary_dir:
-                temporary = temporary_dir / destination.name
-                _encode_review(source, temporary, start, duration)
-                with run_lock(run_id):
-                    os.replace(temporary, destination)
-            generated.append(destination)
+            generated.append(build_review_for_result(run_id, result))
     except Exception as exc:
         return {
             "status": "warning",
@@ -136,6 +151,8 @@ def finalize_run_media(run_id: str, results: list[dict], retain_sources: bool) -
     if not retain_sources:
         with run_lock(run_id):
             for row in rows:
+                if row.get("status") == "skipped" or row.get("skip_reason"):
+                    continue
                 source = resolve_manifest_media(location, str(row.get("saved_path") or ""))
                 source.unlink(missing_ok=True)
                 row["status"] = "cleaned"

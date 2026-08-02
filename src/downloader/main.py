@@ -25,6 +25,7 @@ def run_download_pipeline(
     download_workers=DOWNLOAD_WORKERS,
     status_callback=None,
     discovery_callback=None,
+    clip_ready_callback=None,
 ):
     os.makedirs(download_dir, exist_ok=True)
     rows, by_clip_id, by_media_ref = load_manifest(manifest_path)
@@ -63,12 +64,19 @@ def run_download_pipeline(
 
             pending_rows = []
             already_downloaded = 0
-            for row in rows:
+            analysis_indexes = {
+                row.get("clip_id"): index
+                for index, row in enumerate(rows, start=1)
+                if row.get("clip_id")
+            }
+            for analysis_index, row in enumerate(rows, start=1):
                 saved_path = row["saved_path"]
                 if saved_path and os.path.exists(saved_path):
                     row["status"] = "downloaded"
                     row["error"] = ""
                     already_downloaded += 1
+                    if clip_ready_callback is not None:
+                        clip_ready_callback({**row, "_analysis_index": analysis_index})
                     continue
                 if row.get("skip_reason"):
                     row["status"] = "skipped"
@@ -120,6 +128,11 @@ def run_download_pipeline(
                             manifest_row["error"] = ""
                             completed += 1
                             print(f"[OK]   {result_clip_id}")
+                            if clip_ready_callback is not None:
+                                clip_ready_callback({
+                                    **manifest_row,
+                                    "_analysis_index": analysis_indexes[result_clip_id],
+                                })
                         else:
                             manifest_row["status"] = "failed"
                             manifest_row["error"] = "pitch video download failed"

@@ -88,6 +88,8 @@ def download_with_retries(url: str, filepath: str, retries: int = RETRY_COUNT):
 
 
 def download_one_row(row):
+    from backend.resources import SCHEDULER
+
     clip_id = row["clip_id"]
     download_url = row.get("download_url") or row.get("s3_url") or ""
     saved_path = row["saved_path"]
@@ -98,5 +100,6 @@ def download_one_row(row):
     if not download_url:
         return clip_id, False, "pitch video authorization is unavailable", saved_path
 
-    ok, err = download_with_retries(download_url, saved_path, retries=RETRY_COUNT)
+    with SCHEDULER.download_slot():
+        ok, err = download_with_retries(download_url, saved_path, retries=RETRY_COUNT)
     return clip_id, ok, err, saved_path

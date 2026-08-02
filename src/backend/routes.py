@@ -24,6 +24,7 @@ from .jobs import (
     hydrated_job,
     latest_job_for_game,
     list_runs,
+    list_run_summaries,
     run_existing_detection_job,
     run_job,
     write_job_state,
@@ -55,6 +56,10 @@ def _public_candidate(candidate: dict) -> dict:
             "site", "result", "status", "trackman_available",
         )
     }
+
+
+def _persistable_job(job: dict) -> dict:
+    return {key: value for key, value in job.items() if key != "results"}
 
 
 def _admin_authorized() -> bool:
@@ -209,6 +214,20 @@ def register_routes(app):
 
     @app.get("/api/runs")
     def runs():
+        if request.args.get("view") == "summary":
+            summaries = list_run_summaries()
+            signature = hashlib.sha256(
+                json.dumps(
+                    [(item["id"], item.get("updated_at"), item.get("status")) for item in summaries],
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            if request.if_none_match.contains(signature):
+                return Response(status=304)
+            response = jsonify({"runs": summaries, "updated_at": time.time()})
+            response.set_etag(signature)
+            response.headers["Cache-Control"] = "no-cache"
+            return response
         return jsonify({"runs": list_runs(), "updated_at": time.time()})
 
     @app.get("/api/runs/<run_id>")
@@ -360,7 +379,7 @@ def register_routes(app):
         if latest_job and latest_job.get("status") == "ready":
             run_id = latest_job["id"]
             queued = {
-                **latest_job,
+                **_persistable_job(latest_job),
                 "status": "queued",
                 "phase": "queued",
                 "message": "Queued stance detection",
@@ -379,7 +398,7 @@ def register_routes(app):
         if latest_job and latest_job.get("manifest", {}).get("total", 0) > 0:
             run_id = latest_job["id"]
             queued = {
-                **latest_job,
+                **_persistable_job(latest_job),
                 "status": "queued",
                 "phase": "queued",
                 "message": "Queued download resume",
@@ -412,7 +431,6 @@ def register_routes(app):
             "pitch_scope": "duke_catcher",
             "trumedia_match": _public_candidate(match.match),
             "result_count": 0,
-            "results": [],
             "created_at": time.time(),
             "updated_at": time.time(),
         }
