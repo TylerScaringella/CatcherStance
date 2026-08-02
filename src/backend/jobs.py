@@ -22,7 +22,10 @@ from .storage import (
 
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
-ACTIVE_STATUSES = {"queued", "running", "downloading", "detecting", "finalizing"}
+ACTIVE_STATUSES = {
+    "queued", "running", "resolving_game", "discovering_pitches", "downloading",
+    "detecting", "building_review", "cleaning_up", "finalizing",
+}
 
 
 def _read_json(path: Path, default):
@@ -140,7 +143,12 @@ def set_job_progress(
     current: int | None = None,
     total: int | None = None,
 ) -> None:
-    phase = "detecting" if "download" not in message.lower() else "downloading"
+    lowered = message.lower()
+    phase = (
+        "discovering_pitches" if "discover" in lowered
+        else "downloading" if "download" in lowered
+        else "detecting"
+    )
     updates = {"status": phase, "phase": phase, "message": message}
     if current is not None and total is not None:
         updates["progress"] = {
@@ -186,7 +194,10 @@ def manifest_counts(location_or_id: RunLocation | str) -> dict[str, int]:
         if isinstance(location_or_id, RunLocation)
         else resolve_run(location_or_id)
     )
-    counts = {"total": 0, "downloaded": 0, "pending": 0, "failed": 0}
+    counts = {
+        "total": 0, "downloaded": 0, "cleaned": 0, "pending": 0, "failed": 0,
+        "skipped": 0,
+    }
     if location is None:
         return counts
     for row in manifest_rows(location):
@@ -222,7 +233,10 @@ def clip_media(job_id: str, clip_id: str) -> Path | None:
         path = resolve_manifest_media(location, row.get("saved_path", ""))
     except ValueError:
         return None
-    return path if path.is_file() else None
+    if path.is_file():
+        return path
+    review = location.path / "artifacts" / f"review-{clip_id}.mp4"
+    return review if review.is_file() else None
 
 
 def clip_result(job_id: str, clip_id: str) -> dict | None:
@@ -247,6 +261,21 @@ def job_from_location(location: RunLocation) -> dict | None:
         return None
 
     results = load_results(location)
+    rows_by_clip = {row.get("clip_id"): row for row in manifest_rows(location)}
+    for result in results:
+        media_mode = "unavailable"
+        manifest = rows_by_clip.get(result.get("clip_id"))
+        if manifest is not None:
+            try:
+                if resolve_manifest_media(location, manifest.get("saved_path", "")).is_file():
+                    media_mode = "source"
+            except ValueError:
+                pass
+        if media_mode == "unavailable" and (
+            location.path / "artifacts" / f"review-{result.get('clip_id')}.mp4"
+        ).is_file():
+            media_mode = "review"
+        result["media_mode"] = media_mode
     counts = manifest_counts(location)
     created_at = float(saved.get("created_at") or location.path.stat().st_mtime)
     updated_at = max(
@@ -279,7 +308,8 @@ def job_from_location(location: RunLocation) -> dict | None:
             },
         )
     elif counts["total"] > 0:
-        if counts["downloaded"] == counts["total"] and counts["failed"] == 0:
+        available = counts["downloaded"] + counts["cleaned"] + counts["skipped"]
+        if available == counts["total"] and counts["failed"] == 0:
             if saved.get("status") in ACTIVE_STATUSES and time.time() - updated_at < 600:
                 job["status"] = saved.get("status")
                 job["phase"] = saved.get("phase", "detecting")
@@ -292,20 +322,22 @@ def job_from_location(location: RunLocation) -> dict | None:
                 )
             job["progress"] = {
                 "phase": job["phase"],
-                "current": counts["downloaded"],
+                "current": available,
                 "total": counts["total"],
                 "percent": 100,
             }
         else:
             recent = time.time() - updated_at < 600
             status = saved.get("status") if recent else "interrupted"
-            if status not in ACTIVE_STATUSES:
+            if status not in ACTIVE_STATUSES and status != "auth_required":
                 status = "interrupted"
             job.update(
                 status=status,
-                phase="downloading",
+                phase="auth_required" if status == "auth_required" else "downloading",
                 message=(
-                    f"Downloading videos: {counts['downloaded']} of {counts['total']}"
+                    "TruMedia authentication must be refreshed before this run can continue."
+                    if status == "auth_required"
+                    else f"Downloading videos: {counts['downloaded']} of {counts['total']}"
                     if status != "interrupted"
                     else f"Partial run: {counts['downloaded']} of {counts['total']} downloaded"
                 ),
@@ -400,6 +432,11 @@ def run_existing_detection_job(job_id: str) -> None:
                 job_id, message, current, total
             ),
         )
+        from .media_lifecycle import finalize_run_media
+
+        current = hydrated_job(job_id) or {}
+        set_job(job_id, status="building_review", phase="building_review", message="Building compact review clips")
+        cleanup = finalize_run_media(job_id, rows, bool(current.get("retain_sources", False)))
         set_job(job_id, status="finalizing", phase="finalizing", message="Finalizing outputs")
         set_job(
             job_id,
@@ -408,6 +445,7 @@ def run_existing_detection_job(job_id: str) -> None:
             message=f"Detection complete for {len(rows)} pitches",
             result_count=len(rows),
             results=rows,
+            cleanup=cleanup,
         )
     except Exception as exc:
         _record_failure(job_id, exc)
@@ -417,14 +455,24 @@ def run_job(job_id: str, start_url: str) -> None:
     try:
         from pipeline import run_game_detection
 
-        set_job(job_id, status="downloading", phase="downloading", message="Downloading pitch videos")
+        set_job(job_id, status="discovering_pitches", phase="discovering_pitches", message="Discovering TruMedia pitch videos")
         rows = run_game_detection(
             run_id=job_id,
             start_url=start_url,
             status_callback=lambda message, current, total: set_job_progress(
                 job_id, message, current, total
             ),
+            discovery_callback=lambda stats: set_job(
+                job_id, discovery=stats, pitch_scope="duke_catcher"
+            ),
         )
+        from .media_lifecycle import finalize_run_media
+
+        current = hydrated_job(job_id) or {}
+        set_job(job_id, status="building_review", phase="building_review", message="Building compact review clips")
+        cleanup = finalize_run_media(job_id, rows, bool(current.get("retain_sources", False)))
+        if cleanup.get("status") == "cleaned":
+            set_job(job_id, status="cleaning_up", phase="cleaning_up", message="Source clips removed")
         set_job(job_id, status="finalizing", phase="finalizing", message="Finalizing outputs")
         set_job(
             job_id,
@@ -433,6 +481,15 @@ def run_job(job_id: str, start_url: str) -> None:
             message=f"Detection complete for {len(rows)} pitches",
             result_count=len(rows),
             results=rows,
+            cleanup=cleanup,
         )
     except Exception as exc:
-        _record_failure(job_id, exc)
+        if "authentication" in str(exc).lower() or "session is expired" in str(exc).lower():
+            set_job(
+                job_id,
+                status="auth_required",
+                phase="auth_required",
+                message="TruMedia authentication must be refreshed before this run can continue.",
+            )
+        else:
+            _record_failure(job_id, exc)

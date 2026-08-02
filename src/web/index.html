@@ -23,6 +23,10 @@
           <a href="#/runs" data-nav="runs">Active Runs</a>
         </nav>
         <div class="header-status">
+          <button id="trumediaButton" class="integration-pill" type="button" aria-haspopup="dialog">
+            <span class="integration-dot" aria-hidden="true"></span>
+            <span id="trumediaText">TruMedia</span>
+          </button>
           <button id="activityButton" class="activity-pill" type="button">
             <span class="activity-dot" aria-hidden="true"></span>
             <span id="activityText">Checking runs</span>
@@ -48,6 +52,9 @@
 
     <dialog id="pitchDialog" class="pitch-dialog" aria-labelledby="pitchDialogTitle">
       <div id="pitchDialogContent"></div>
+    </dialog>
+    <dialog id="workflowDialog" class="workflow-dialog" aria-labelledby="workflowDialogTitle">
+      <div id="workflowDialogContent"></div>
     </dialog>
 
     <script>
