@@ -292,8 +292,8 @@ function pageHeader(kicker, title, description, actions = []) {
 
 function progressBar(run) {
   const progress = run.progress || {};
-  const percent = Number(progress.percent);
-  const determinate = Number.isFinite(percent);
+  const percent = progress.percent == null ? null : Number(progress.percent);
+  const determinate = percent != null && Number.isFinite(percent);
   const stages = progress.stages || {};
   const elapsed = ACTIVE.has(run.status) && Number(run.created_at)
     ? Date.now() / 1000 - Number(run.created_at)
@@ -325,23 +325,69 @@ function progressBar(run) {
     element("div", { className: "stage-strip", "aria-label": "Pipeline stages" },
       PIPELINE_STAGES.map((stage) => {
         const item = stages[stage] || {};
-        const stagePercent = Number(item.percent);
+        const stagePercent = item.percent == null ? null : Number(item.percent);
         const stateName = item.status === "complete" || stagePercent >= 100
           ? "complete"
           : activeStage === stage
             ? "active"
-            : item.current !== undefined
+            : item.current != null
               ? "started"
               : "pending";
         return element("span", { className: `stage-chip ${stateName}` }, [
           element("i", { "aria-hidden": "true" }),
           element("span", { text: statusLabel(stage.replace("_pitches", "")) }),
-          ...(Number.isFinite(stagePercent) ? [element("strong", { text: `${stagePercent.toFixed(0)}%` })] : []),
+          ...(stagePercent != null && Number.isFinite(stagePercent) ? [element("strong", { text: `${stagePercent.toFixed(0)}%` })] : []),
         ]);
       }),
     ),
     ...(facts ? [element("small", { className: "progress-facts", text: facts })] : []),
   ]);
+}
+
+function gameRunAction(game, run) {
+  if (run?.status === "complete") {
+    return element("div", { className: "hero-actions", dataset: { runAction: run.id, actionKind: "game", actionState: "complete" } }, [
+      element("a", { className: "button primary", href: `#/results/${run.id}`, text: "Review results" }),
+      ...(!run.read_only ? [element("button", {
+        className: "button hero-secondary", type: "button", text: "Reprocess",
+        on: { click: (event) => submitRun(game, event.currentTarget.closest(".game-detail"), true) },
+      })] : []),
+    ]);
+  }
+  if (run && ACTIVE.has(run.status) && run.result_count > 0) {
+    return element("div", { className: "hero-actions", dataset: { runAction: run.id, actionKind: "game", actionState: `partial-${run.result_count}` } }, [
+      element("a", { className: "button primary", href: `#/results/${run.id}`, text: `Review ${run.result_count} available` }),
+      element("span", { className: "muted", text: "Processing continues in the background" }),
+    ]);
+  }
+  return element("button", {
+    className: "button primary",
+    dataset: run ? {
+      runAction: run.id,
+      actionKind: "game",
+      actionState: ACTIVE.has(run.status) ? "active" : run.status || "ready",
+    } : undefined,
+    type: "button",
+    disabled: run && ACTIVE.has(run.status),
+    text: run && ACTIVE.has(run.status) ? "Run in progress" : run?.status === "ready" ? "Run detection" : "Start detection",
+    on: { click: (event) => submitRun(game, event.currentTarget.closest(".game-detail")) },
+  });
+}
+
+function runCardAction(run) {
+  return run.status === "complete" || run.result_count > 0
+    ? element("a", {
+        className: "button secondary", href: `#/results/${run.id}`, text: "Open results",
+        dataset: {
+          runAction: run.id,
+          actionKind: "card",
+          actionState: run.status === "complete" ? "complete" : `partial-${run.result_count}`,
+        },
+      })
+    : element("a", {
+        className: "button ghost", href: "#/games", text: "View game",
+        dataset: { runAction: run.id, actionKind: "card", actionState: run.status || "ready" },
+      });
 }
 
 function runBadge(run) {
@@ -462,26 +508,7 @@ function renderGames() {
   if (!game) {
     detail.append(element("div", { className: "empty-state", text: "Select a game to continue." }));
   } else {
-    const runAction = run?.status === "complete"
-      ? element("div", { className: "hero-actions" }, [
-          element("a", { className: "button primary", href: `#/results/${run.id}`, text: "Review results" }),
-          ...(!run.read_only ? [element("button", {
-            className: "button hero-secondary", type: "button", text: "Reprocess",
-            on: { click: () => submitRun(game, detail, true) },
-          })] : []),
-        ])
-      : run && ACTIVE.has(run.status) && run.result_count > 0
-        ? element("div", { className: "hero-actions" }, [
-            element("a", { className: "button primary", href: `#/results/${run.id}`, text: `Review ${run.result_count} available` }),
-            element("span", { className: "muted", text: "Processing continues in the background" }),
-          ])
-      : element("button", {
-          className: "button primary",
-          type: "button",
-          disabled: run && ACTIVE.has(run.status),
-          text: run && ACTIVE.has(run.status) ? "Run in progress" : run?.status === "ready" ? "Run detection" : "Start detection",
-          on: { click: () => submitRun(game, detail) },
-        });
+    const runAction = gameRunAction(game, run);
     detail.append(
       element("div", { className: "game-hero" }, [
         element("div", {}, [
@@ -608,14 +635,15 @@ function renderRuns() {
         : element("p", { className: "run-message", text: run.message || statusLabel(run.status) }),
       element("div", { className: "run-facts" }, [
         element("span", { text: `${run.result_count || 0} results`, dataset: { resultCount: run.id } }),
-        element("span", { text: `${(run.manifest?.downloaded || 0) + (run.manifest?.cleaned || 0)}/${run.manifest?.total || 0} clips downloaded` }),
+        element("span", {
+          text: `${(run.manifest?.downloaded || 0) + (run.manifest?.cleaned || 0)}/${run.manifest?.total || 0} clips downloaded`,
+          dataset: { downloadCount: run.id },
+        }),
         ...(run.revision ? [element("span", { text: `Revision ${run.revision}` })] : []),
         ...(run.cleanup?.status ? [element("span", { text: `Storage: ${statusLabel(run.cleanup.status)}` })] : []),
         element("span", { text: run.read_only ? "Read-only fixture" : "Live run" }),
       ]),
-      run.status === "complete" || run.result_count > 0
-        ? element("a", { className: "button secondary", href: `#/results/${run.id}`, text: "Open results" })
-        : element("a", { className: "button ghost", href: "#/games", text: "View game" }),
+      runCardAction(run),
     ]);
     grid.append(card);
   }
@@ -924,6 +952,22 @@ function patchRunNodes(run) {
       ? `${run.result_count || 0} pitch results`
       : `${run.result_count || 0} results`;
   });
+  document.querySelectorAll(`[data-download-count="${run.id}"]`).forEach((node) => {
+    node.textContent = `${(run.manifest?.downloaded || 0) + (run.manifest?.cleaned || 0)}/${run.manifest?.total || 0} clips downloaded`;
+  });
+  document.querySelectorAll(`[data-run-action="${run.id}"]`).forEach((node) => {
+    if (node.dataset.actionKind === "card") {
+      const replacement = runCardAction(run);
+      if (node.dataset.actionState !== replacement.dataset.actionState) node.replaceWith(replacement);
+    }
+    if (node.dataset.actionKind === "game") {
+      const game = state.schedule?.games?.find((item) => item.id === run.game?.id);
+      if (game) {
+        const replacement = gameRunAction(game, run);
+        if (node.dataset.actionState !== replacement.dataset.actionState) node.replaceWith(replacement);
+      }
+    }
+  });
   const card = document.querySelector(`[data-run-id="${run.id}"]`);
   if (card) card.classList.toggle("active-run", ACTIVE.has(run.status));
 }
@@ -988,7 +1032,7 @@ async function applyRunSummaries(incoming) {
   if (current.view === "results" && current.id) {
     const summary = state.runs.find((run) => run.id === current.id);
     const old = previous.get(current.id);
-    if (summary && (!old || summary.result_count !== old.result_count || summary.updated_at !== old.updated_at)) {
+    if (summary && (!old || summary.result_count !== old.result_count)) {
       patchResults(await ensureRunDetail(current.id));
     }
   }

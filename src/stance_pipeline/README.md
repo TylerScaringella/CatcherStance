@@ -44,4 +44,6 @@ results = [analyzer.analyze(path) for path in clip_paths]
 
 Do not create an unbounded thread per pitch on a single GPU or MPS device. The web
 runner uses one FIFO inference lease and overlaps downloads and compact-review encoding
-around it. Each completed pitch is atomically persisted before the next pitch begins.
+around it. A run requests the lease only after its first clip is ready, and each lease
+slot reuses one initialized analyzer without sharing mutable Ultralytics state with
+another active slot. Each completed pitch is atomically persisted before the next pitch begins.

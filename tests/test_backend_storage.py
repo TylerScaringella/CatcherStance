@@ -138,9 +138,19 @@ class RunApiTests(unittest.TestCase):
         cls.client = create_app().test_client()
 
     def test_result_numeric_fields_are_normalized(self):
-        result = jobs.normalize_result({"confidence": "0.75", "valid_frame_count": "12"})
+        result = jobs.normalize_result({
+            "confidence": "0.75",
+            "valid_frame_count": "12",
+            "video_path": "/private/run/video.mp4",
+            "saved_path": "/private/run/video.mp4",
+            "s3_url": "https://signed.invalid",
+            "media_ref": "s3://private/video.mp4",
+            "error": "/private/run/video.mp4 failed",
+        })
         self.assertEqual(0.75, result["confidence"])
         self.assertEqual(12, result["valid_frame_count"])
+        for key in ("video_path", "saved_path", "s3_url", "media_ref", "error"):
+            self.assertNotIn(key, result)
 
     def test_example_run_is_discoverable_with_correct_results(self):
         response = self.client.get("/api/runs")
@@ -205,6 +215,103 @@ class RunApiTests(unittest.TestCase):
             hydrated = jobs.job_from_location(location)
             self.assertEqual("detecting", hydrated["phase"])
             self.assertEqual(0, hydrated["progress"]["percent"])
+
+    def test_streaming_detection_progress_survives_partial_download_hydration(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            storage, "RUNS_DIR", Path(directory)
+        ):
+            run_dir = Path(directory) / "streaming-run"
+            run_dir.mkdir(parents=True)
+            (run_dir / "video_manifest.csv").write_text(
+                "clip_id,saved_path,status\nclip-1,downloads/clip-1.mp4,downloaded\n"
+                "clip-2,downloads/clip-2.mp4,pending\n",
+                encoding="utf-8",
+            )
+            payload = {
+                "id": "streaming-run",
+                "game": {"id": "game-1", "opponent": "Test", "date": "2026-01-01"},
+                "status": "detecting",
+                "phase": "detecting",
+                "message": "Processed 1 of 2 pitches",
+                "created_at": time.time(),
+                "updated_at": time.time(),
+                "progress": {
+                    "active_stage": "detecting",
+                    "phase": "detecting",
+                    "current": 1,
+                    "total": 2,
+                    "percent": 50,
+                    "stages": {},
+                },
+            }
+            (run_dir / "job.json").write_text(json.dumps(payload), encoding="utf-8")
+            location = storage.RunLocation("streaming-run", run_dir, "live", False)
+            hydrated = jobs.job_from_location(location)
+            self.assertEqual("detecting", hydrated["status"])
+            self.assertEqual("detecting", hydrated["progress"]["active_stage"])
+            self.assertEqual(50, hydrated["progress"]["percent"])
+
+    def test_finalization_preserves_discovery_expected_count(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            storage, "RUNS_DIR", Path(directory)
+        ):
+            run_id = "expected-count-run"
+            initial = {
+                "id": run_id,
+                "game": {"id": "game-1", "opponent": "Test", "date": "2026-01-01"},
+                "status": "queued",
+                "phase": "queued",
+                "created_at": time.time(),
+                "updated_at": time.time(),
+            }
+            jobs.JOBS[run_id] = dict(initial)
+            jobs.write_job_state(initial)
+
+            def fake_pipeline(**kwargs):
+                kwargs["discovery_callback"]({"downloadable_pitches": 5})
+                return [{"clip_id": "clip-1"}, {"clip_id": "clip-2"}]
+
+            with patch("pipeline.run_game_detection", side_effect=fake_pipeline), patch(
+                "backend.media_lifecycle.finalize_run_media",
+                return_value={"status": "retained", "sources_retained": True},
+            ):
+                jobs.run_job(run_id, "https://example.invalid")
+
+            saved = json.loads((Path(directory) / run_id / "job.json").read_text(encoding="utf-8"))
+            self.assertEqual(5, saved["expected_result_count"])
+            self.assertEqual(2, saved["result_count"])
+            jobs.JOBS.pop(run_id, None)
+
+    def test_failed_run_is_not_revived_by_stale_canonical_results(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            storage, "RUNS_DIR", Path(directory)
+        ):
+            run_dir = Path(directory) / "failed-run"
+            run_dir.mkdir(parents=True)
+            (run_dir / "job.json").write_text(json.dumps({
+                "id": "failed-run",
+                "game": {"id": "game-1", "opponent": "Test", "date": "2026-01-01"},
+                "status": "failed",
+                "phase": "failed",
+                "created_at": time.time(),
+                "updated_at": time.time(),
+            }), encoding="utf-8")
+            (run_dir / "detections.json").write_text(json.dumps([{
+                "pitch_index": 1,
+                "clip_id": "stale-clip",
+                "video_path": "/private/stale.mp4",
+                "stance": "RKD",
+                "confidence": 0.9,
+                "status": "ok",
+            }]), encoding="utf-8")
+            location = storage.RunLocation("failed-run", run_dir, "live", False)
+            hydrated = jobs.job_from_location(location)
+            self.assertEqual("failed", hydrated["status"])
+            self.assertFalse(hydrated["results_complete"])
+            self.assertEqual([], hydrated["results"])
+            export = self.client.get("/api/results/failed-run/json")
+            self.assertEqual(409, export.status_code)
+            self.assertEqual("results_incomplete", export.get_json()["code"])
 
     def test_stale_embedded_job_results_are_not_returned(self):
         response = self.client.get("/api/runs/duke-2026-04-21-liberty-sample")

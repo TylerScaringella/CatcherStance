@@ -267,6 +267,9 @@ def register_routes(app):
             return _error("invalid run id", 400)
         if location is None:
             return _error("run not found", 404)
+        job = hydrated_job(run_id)
+        if job is None or not job.get("results_complete"):
+            return _error("results are not finalized", 409, "results_incomplete")
         file_path = run_file(location, f"detections.{fmt}")
         if not file_path.is_file():
             return _error("results not found", 404)

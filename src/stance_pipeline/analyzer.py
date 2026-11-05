@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -27,13 +28,15 @@ from .model import StanceClassifier
 from .schemas import EventAnchor, FrameBox, PitchStanceResult, PoseObservation
 from .temporal import StableWindow, choose_stable_window, contiguous_groups
 
-_MODEL_CACHE: dict[str, YOLO] = {}
+_MODEL_CACHE: dict[tuple[str, int], YOLO] = {}
 
 
 def _load_model(path: Path) -> YOLO:
-    key = str(path.resolve())
+    # Each inference worker owns its Ultralytics model instances. Workers may run
+    # concurrently on non-MPS deployments, and Ultralytics prediction state is mutable.
+    key = (str(path.resolve()), threading.get_ident())
     if key not in _MODEL_CACHE:
-        _MODEL_CACHE[key] = YOLO(key)
+        _MODEL_CACHE[key] = YOLO(key[0])
     return _MODEL_CACHE[key]
 
 
@@ -86,7 +89,7 @@ def _predict_kwargs(device: str | None, image_size: int, confidence: float) -> d
     return kwargs
 
 
-@dataclass
+@dataclass(frozen=True)
 class PitchStanceConfig:
     pose_model_path: Path = POSE_MODEL_PATH
     phc_model_path: Path | None = field(default_factory=lambda: resolve_model_asset("baseballcv_phc"))

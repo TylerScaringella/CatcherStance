@@ -127,6 +127,9 @@ The default storage policy creates `artifacts/review-<clip-id>.mp4`, validates e
 CSV and JSON exports remain unavailable until final aggregation completes. Partial
 results are read from the internal per-pitch state through the run-detail API; they
 are not duplicated inside `job.json`.
+If discovery, download, or processing fails, the partial records remain resumable but
+no canonical export replaces the last valid output. Public API responses omit local
+paths and provider media references.
 
 ## Performance Configuration
 
@@ -140,7 +143,8 @@ export CATCHER_STANCE_REVIEW_WORKERS=1
 
 Keep inference at one worker on Apple MPS unless a target-specific benchmark proves
 otherwise. Multiple games can prepare downloads concurrently, but they receive the
-accelerator in FIFO order. The app remains responsive because run polling is summary-only,
+accelerator in FIFO order after their first validated clip is ready. Each slot reuses
+its initialized analyzer across runs. The app remains responsive because polling is summary-only,
 conditional, paused in hidden tabs, and applied through targeted DOM updates.
 
 Temporary processing files are created under `data/tmp/<run-id>-*` and removed
@@ -182,6 +186,17 @@ Run the automated suite:
 ```bash
 PYTHONPATH=src ./.venv/bin/python -m unittest discover -s tests -v
 ```
+
+Run the deterministic polling and partial-results browser test:
+
+```bash
+python -m playwright install chromium
+RUN_BROWSER_TESTS=1 PYTHONPATH=src ./.venv/bin/python \
+  -m unittest discover -s tests -p 'test_web_browser.py' -v
+```
+
+This test uses temporary run storage and does not modify checked-in examples or require
+a TruMedia session.
 
 Start the app and verify the checked-in sample without TruMedia:
 

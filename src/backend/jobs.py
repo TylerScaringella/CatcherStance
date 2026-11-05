@@ -159,6 +159,10 @@ def normalize_result(row: dict, location: RunLocation | None = None) -> dict:
             "quality_flags": _split_csv(result.get("quality_flags")),
         }
     )
+    for private_key in (
+        "video_path", "saved_path", "download_url", "s3_url", "media_ref", "error",
+    ):
+        result.pop(private_key, None)
     return result
 
 
@@ -170,12 +174,13 @@ def write_job_state(job: dict) -> None:
 
 
 def set_job(job_id: str, **updates) -> None:
-    with JOBS_LOCK:
-        current = JOBS.setdefault(job_id, {"id": job_id})
-        current.update(updates)
-        current["updated_at"] = time.time()
-        job = dict(current)
-    write_job_state(job)
+    with run_lock(job_id):
+        with JOBS_LOCK:
+            current = JOBS.setdefault(job_id, {"id": job_id})
+            current.update(updates)
+            current["updated_at"] = time.time()
+            job = dict(current)
+        write_job_state(job)
 
 
 def set_job_progress(
@@ -194,56 +199,57 @@ def set_job_progress(
         else "detecting"
     )
     now = time.time()
-    with JOBS_LOCK:
-        current_job = JOBS.setdefault(job_id, {"id": job_id})
-        previous = current_job.get("progress") if isinstance(current_job.get("progress"), dict) else {}
-        stage_rank = {stage: index for index, stage in enumerate(PROGRESS_STAGES)}
-        previous_active = previous.get("active_stage")
-        if (
-            activate
-            and previous_active in stage_rank
-            and resolved_phase in stage_rank
-            and stage_rank[resolved_phase] < stage_rank[previous_active]
-        ):
-            activate = False
-        stages = dict(previous.get("stages") or {})
-        previous_stage = dict(stages.get(resolved_phase) or {})
-        stage_current = current if current is not None else previous_stage.get("current")
-        stage_total = total if total is not None else previous_stage.get("total")
-        percent = (
-            round((stage_current / stage_total) * 100, 1)
-            if stage_current is not None and stage_total
-            else None
-        )
-        stage_status = "complete" if percent is not None and percent >= 100 else "active"
-        stages[resolved_phase] = {
-            **previous_stage,
-            "status": stage_status,
-            "current": stage_current,
-            "total": stage_total,
-            "percent": percent,
-            "started_at": previous_stage.get("started_at") or now,
-            "updated_at": now,
-            **({"completed_at": now} if stage_status == "complete" else {}),
-        }
-        active_stage = resolved_phase if activate else previous.get("active_stage", resolved_phase)
-        active_data = stages.get(active_stage, {})
-        current_job.update(
-            status=active_stage,
-            phase=active_stage,
-            message=message if activate else current_job.get("message", message),
-            progress={
-                "active_stage": active_stage,
-                "phase": active_stage,
-                "current": active_data.get("current"),
-                "total": active_data.get("total"),
-                "percent": active_data.get("percent"),
-                "stages": stages,
-            },
-            updated_at=now,
-        )
-        job = dict(current_job)
-    write_job_state(job)
+    with run_lock(job_id):
+        with JOBS_LOCK:
+            current_job = JOBS.setdefault(job_id, {"id": job_id})
+            previous = current_job.get("progress") if isinstance(current_job.get("progress"), dict) else {}
+            stage_rank = {stage: index for index, stage in enumerate(PROGRESS_STAGES)}
+            previous_active = previous.get("active_stage")
+            if (
+                activate
+                and previous_active in stage_rank
+                and resolved_phase in stage_rank
+                and stage_rank[resolved_phase] < stage_rank[previous_active]
+            ):
+                activate = False
+            stages = dict(previous.get("stages") or {})
+            previous_stage = dict(stages.get(resolved_phase) or {})
+            stage_current = current if current is not None else previous_stage.get("current")
+            stage_total = total if total is not None else previous_stage.get("total")
+            percent = (
+                round((stage_current / stage_total) * 100, 1)
+                if stage_current is not None and stage_total
+                else None
+            )
+            stage_status = "complete" if percent is not None and percent >= 100 else "active"
+            stages[resolved_phase] = {
+                **previous_stage,
+                "status": stage_status,
+                "current": stage_current,
+                "total": stage_total,
+                "percent": percent,
+                "started_at": previous_stage.get("started_at") or now,
+                "updated_at": now,
+                **({"completed_at": now} if stage_status == "complete" else {}),
+            }
+            active_stage = resolved_phase if activate else previous.get("active_stage", resolved_phase)
+            active_data = stages.get(active_stage, {})
+            current_job.update(
+                status=active_stage,
+                phase=active_stage,
+                message=message if activate else current_job.get("message", message),
+                progress={
+                    "active_stage": active_stage,
+                    "phase": active_stage,
+                    "current": active_data.get("current"),
+                    "total": active_data.get("total"),
+                    "percent": active_data.get("percent"),
+                    "stages": stages,
+                },
+                updated_at=now,
+            )
+            job = dict(current_job)
+        write_job_state(job)
 
 
 def begin_job_stage(job_id: str, phase: str, message: str, total: int | None = None) -> None:
@@ -260,7 +266,10 @@ def load_results(location_or_id: RunLocation | str) -> list[dict]:
     )
     if location is None:
         return []
-    rows = _read_json(location.path / "detections.json", [])
+    canonical = _read_json(location.path / "detections.json", [])
+    saved = _read_json(location.path / "job.json", {})
+    canonical_complete = location.read_only or saved.get("status") == "complete"
+    rows = canonical if canonical_complete else []
     if not rows and not location.read_only:
         state_directory = pitch_state_dir(location.run_id)
         partial_rows = []
@@ -269,10 +278,11 @@ def load_results(location_or_id: RunLocation | str) -> list[dict]:
                 payload = _read_json(path, {})
                 if isinstance(payload.get("detection"), dict):
                     partial_rows.append(payload["detection"])
-        rows = sorted(
+        partial_rows = sorted(
             partial_rows,
             key=lambda row: int(row.get("pitch_index") or 0),
         )
+        rows = partial_rows
     return [normalize_result(row, location) for row in rows if isinstance(row, dict)]
 
 
@@ -411,7 +421,9 @@ def job_from_location(location: RunLocation) -> dict | None:
         "result_count": len(results),
     }
 
-    results_complete = (location.path / "detections.json").is_file()
+    results_complete = (location.path / "detections.json").is_file() and (
+        location.read_only or saved.get("status") == "complete"
+    )
     job["expected_result_count"] = int(
         saved.get("expected_result_count")
         or saved.get("discovery", {}).get("downloadable_pitches", 0)
@@ -463,23 +475,34 @@ def job_from_location(location: RunLocation) -> dict | None:
             status = saved.get("status") if recent else "interrupted"
             if status not in ACTIVE_STATUSES and status != "auth_required":
                 status = "interrupted"
-            job.update(
-                status=status,
-                phase="auth_required" if status == "auth_required" else "downloading",
-                message=(
-                    "TruMedia authentication must be refreshed before this run can continue."
-                    if status == "auth_required"
-                    else f"Downloading videos: {counts['downloaded']} of {counts['total']}"
-                    if status != "interrupted"
-                    else f"Partial run: {counts['downloaded']} of {counts['total']} downloaded"
-                ),
-                progress={
-                    "phase": "downloading",
-                    "current": counts["downloaded"],
-                    "total": counts["total"],
-                    "percent": round(counts["downloaded"] / counts["total"] * 100, 1),
-                },
-            )
+            saved_progress = saved.get("progress")
+            if status in {"detecting", "building_review"} and isinstance(saved_progress, dict):
+                job.update(
+                    status=status,
+                    phase=saved.get("phase", status),
+                    message=saved.get("message") or "Running catcher detection",
+                    progress=saved_progress,
+                )
+            else:
+                job.update(
+                    status=status,
+                    phase="auth_required" if status == "auth_required" else "downloading",
+                    message=(
+                        "TruMedia authentication must be refreshed before this run can continue."
+                        if status == "auth_required"
+                        else f"Downloading videos: {counts['downloaded']} of {counts['total']}"
+                        if status != "interrupted"
+                        else f"Partial run: {counts['downloaded']} of {counts['total']} downloaded"
+                    ),
+                    progress={
+                        "active_stage": "downloading",
+                        "phase": "downloading",
+                        "current": counts["downloaded"],
+                        "total": counts["total"],
+                        "percent": round(counts["downloaded"] / counts["total"] * 100, 1),
+                        "stages": dict((saved_progress or {}).get("stages") or {}),
+                    },
+                )
     elif location.source == "live" and saved:
         job.setdefault("status", "queued")
         job.setdefault("phase", job["status"])
@@ -508,13 +531,18 @@ def list_runs() -> list[dict]:
 
 def _result_count_from_disk(location: RunLocation) -> int:
     canonical = location.path / "detections.json"
+    canonical_count = 0
     if canonical.is_file():
         rows = _read_json(canonical, [])
-        return len(rows) if isinstance(rows, list) else 0
+        canonical_count = len(rows) if isinstance(rows, list) else 0
     if location.read_only:
-        return 0
+        return canonical_count
+    saved = _read_json(location.path / "job.json", {})
+    if saved.get("status") == "complete":
+        return canonical_count
     directory = pitch_state_dir(location.run_id)
-    return len(list(directory.glob("*.json"))) if directory.is_dir() else 0
+    state_count = len(list(directory.glob("*.json"))) if directory.is_dir() else 0
+    return state_count
 
 
 def job_summary_from_location(location: RunLocation) -> dict | None:
@@ -529,7 +557,9 @@ def job_summary_from_location(location: RunLocation) -> dict | None:
     status = str(saved.get("status") or "queued")
     phase = str(saved.get("phase") or status)
     message = str(saved.get("message") or status)
-    canonical_results = (location.path / "detections.json").is_file()
+    canonical_results = (location.path / "detections.json").is_file() and (
+        location.read_only or saved.get("status") == "complete"
+    )
     results_complete = canonical_results
 
     if canonical_results or (result_count and location.read_only):
@@ -648,6 +678,7 @@ def run_existing_detection_job(job_id: str) -> None:
         from .media_lifecycle import finalize_run_media
 
         current = hydrated_job(job_id) or {}
+        expected = int(current.get("expected_result_count") or len(rows))
         set_job(job_id, status="building_review", phase="building_review", message="Building compact review clips")
         cleanup = finalize_run_media(job_id, rows, bool(current.get("retain_sources", False)))
         set_job(job_id, status="finalizing", phase="finalizing", message="Finalizing outputs")
@@ -657,7 +688,7 @@ def run_existing_detection_job(job_id: str) -> None:
             phase="complete",
             message=f"Detection complete for {len(rows)} pitches",
             result_count=len(rows),
-            expected_result_count=len(rows),
+            expected_result_count=expected,
             results_complete=True,
             cleanup=cleanup,
         )
@@ -690,6 +721,7 @@ def run_job(job_id: str, start_url: str) -> None:
         from .media_lifecycle import finalize_run_media
 
         current = hydrated_job(job_id) or {}
+        expected = int(current.get("expected_result_count") or len(rows))
         set_job(job_id, status="building_review", phase="building_review", message="Building compact review clips")
         cleanup = finalize_run_media(job_id, rows, bool(current.get("retain_sources", False)))
         if cleanup.get("status") == "cleaned":
@@ -701,7 +733,7 @@ def run_job(job_id: str, start_url: str) -> None:
             phase="complete",
             message=f"Detection complete for {len(rows)} pitches",
             result_count=len(rows),
-            expected_result_count=len(rows),
+            expected_result_count=expected,
             results_complete=True,
             cleanup=cleanup,
         )

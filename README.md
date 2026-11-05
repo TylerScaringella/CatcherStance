@@ -88,9 +88,13 @@ artifacts belong in that run's `artifacts/` folder, and incomplete work belongs
 under `data/tmp/`. Atomic per-pitch resume records live under the owning run's
 `state/pitches/` directory and are consolidated into the normal detection exports
 when processing completes. Writes to job state, resume records, and exports are atomic.
+Failed or authentication-blocked runs keep those resume records but do not publish
+canonical exports or report completion. Restarting the run skips every completed clip.
 
 The API resolves media from server-owned manifests and rejects traversal,
 absolute-path escapes, and symlink escapes. `data/examples/` is always read-only.
+Public result payloads never include local paths, stable media references, or signed URLs;
+existing downloadable CSV/JSON schemas remain compatible after finalization.
 Authentication state, runtime caches, temporary files, live runs, and external
 model weights are ignored by Git.
 
@@ -124,6 +128,8 @@ Downloads, inference, and compact-review generation form a bounded staged pipeli
 Validated clips enter detection without waiting for the full game to download, and
 completed pitches become reviewable while later pitches continue processing. Multiple
 games may download concurrently, but game-level inference uses a FIFO accelerator lease.
+Runs enter that queue only after a validated clip is ready. Each inference slot reuses
+one initialized analyzer and owns its Ultralytics model state.
 
 The balanced defaults are eight total download slots, one inference worker, and one
 review encoder. Override them only after benchmarking the target machine:
@@ -138,6 +144,15 @@ One MPS inference worker is intentional. On the development Apple M3, processing
 same two clips with competing pitch threads took `61.2s`, compared with `40.5s`
 sequentially. The pipeline gains throughput by overlapping independent stages rather
 than contending for the same accelerator and model objects.
+
+The fast checks run automatically on pull requests. To exercise real browser polling
+against temporary storage locally, install Chromium and run:
+
+```bash
+python -m playwright install chromium
+RUN_BROWSER_TESTS=1 PYTHONPATH=src ./.venv/bin/python \
+  -m unittest discover -s tests -p 'test_web_browser.py' -v
+```
 
 ## Video Links
 

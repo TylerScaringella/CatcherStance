@@ -36,7 +36,8 @@ class ResourceScheduler:
         self._download_slots = threading.BoundedSemaphore(self.download_workers)
         self._condition = threading.Condition()
         self._inference_queue: deque[object] = deque()
-        self._active_inference: set[str] = set()
+        self._available_inference_slots: deque[int] = deque(range(self.inference_workers))
+        self._active_inference: dict[int, str] = {}
         self._review_pool = ThreadPoolExecutor(
             max_workers=self.review_workers,
             thread_name_prefix="stance-review",
@@ -58,22 +59,25 @@ class ResourceScheduler:
             self._download_slots.release()
 
     @contextmanager
-    def inference_lease(self, run_id: str) -> Iterator[None]:
+    def inference_lease(self, run_id: str) -> Iterator[int]:
         token = object()
         with self._condition:
             self._inference_queue.append(token)
             self._condition.wait_for(
-                lambda: len(self._active_inference) < self.inference_workers
-                and self._inference_queue
+                lambda: bool(self._available_inference_slots)
+                and bool(self._inference_queue)
                 and self._inference_queue[0] is token
             )
             self._inference_queue.popleft()
-            self._active_inference.add(run_id)
+            slot = self._available_inference_slots.popleft()
+            self._active_inference[slot] = run_id
+            self._condition.notify_all()
         try:
-            yield
+            yield slot
         finally:
             with self._condition:
-                self._active_inference.discard(run_id)
+                self._active_inference.pop(slot, None)
+                self._available_inference_slots.append(slot)
                 self._condition.notify_all()
 
     def submit_review(self, function: Callable[..., T], *args, **kwargs) -> Future[T]:
@@ -88,7 +92,8 @@ class ResourceScheduler:
                 "active_downloads": self._active_downloads,
                 "peak_downloads": self._peak_downloads,
                 "queued_inference_runs": len(self._inference_queue),
-                "active_inference_run": next(iter(self._active_inference), None),
+                "active_inference_run": next(iter(self._active_inference.values()), None),
+                "active_inference_runs": list(self._active_inference.values()),
             }
 
 

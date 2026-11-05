@@ -26,6 +26,7 @@ def run_download_pipeline(
     status_callback=None,
     discovery_callback=None,
     clip_ready_callback=None,
+    cancel_event=None,
 ):
     os.makedirs(download_dir, exist_ok=True)
     rows, by_clip_id, by_media_ref = load_manifest(manifest_path)
@@ -61,6 +62,8 @@ def run_download_pipeline(
                 )
             if discovery_callback is not None:
                 discovery_callback(dict(discovery))
+            if cancel_event is not None and cancel_event.is_set():
+                return rows
 
             pending_rows = []
             already_downloaded = 0
@@ -70,6 +73,8 @@ def run_download_pipeline(
                 if row.get("clip_id")
             }
             for analysis_index, row in enumerate(rows, start=1):
+                if cancel_event is not None and cancel_event.is_set():
+                    break
                 saved_path = row["saved_path"]
                 if saved_path and os.path.exists(saved_path):
                     row["status"] = "downloaded"
@@ -94,9 +99,13 @@ def run_download_pipeline(
             row_lookup = {row["clip_id"]: row for row in rows if row.get("clip_id")}
             worker_count = max(1, int(download_workers))
             for offset in range(0, len(pending_rows), worker_count):
+                if cancel_event is not None and cancel_event.is_set():
+                    break
                 batch = pending_rows[offset : offset + worker_count]
                 signed_rows = []
                 for row in batch:
+                    if cancel_event is not None and cancel_event.is_set():
+                        break
                     try:
                         row["download_url"] = sign_media_ref(page, row["media_ref"])
                         signed_rows.append(row)
@@ -128,7 +137,9 @@ def run_download_pipeline(
                             manifest_row["error"] = ""
                             completed += 1
                             print(f"[OK]   {result_clip_id}")
-                            if clip_ready_callback is not None:
+                            if clip_ready_callback is not None and not (
+                                cancel_event is not None and cancel_event.is_set()
+                            ):
                                 clip_ready_callback({
                                     **manifest_row,
                                     "_analysis_index": analysis_indexes[result_clip_id],
@@ -156,6 +167,8 @@ def run_download_pipeline(
     print(f"Failed this run: {failed}")
     print(f"Manifest: {manifest_path}")
     print(f"Files saved in: {download_dir}")
+    if failed:
+        raise RuntimeError(f"{failed} pitch video downloads failed")
     return rows
 
 
