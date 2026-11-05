@@ -353,16 +353,18 @@ def register_routes(app):
     @app.post("/api/run")
     def run_detection(payload_override=None, reprocess: bool = False):
         payload = payload_override if payload_override is not None else (request.get_json(silent=True) or {})
-        game = find_game(payload.get("game_id", ""))
+        requested_game_id = str(payload.get("game_id") or "")
+        force_redownload = bool(payload.get("force_redownload")) or reprocess
+        latest_job = None if force_redownload else latest_job_for_game(requested_game_id)
+        if latest_job and latest_job.get("status") == "complete":
+            return jsonify(latest_job), 200
+
+        game = find_game(requested_game_id)
         if game is None:
             return _error("unknown game_id", 400)
 
-        force_redownload = bool(payload.get("force_redownload")) or reprocess
-        latest_job = None if force_redownload else latest_job_for_game(game["id"])
         if latest_job and latest_job.get("read_only") and latest_job.get("status") != "complete":
             return _error("example runs are read-only", 409)
-        if latest_job and latest_job.get("status") == "complete":
-            return jsonify(latest_job), 200
         if latest_job and latest_job.get("status") in ACTIVE_STATUSES:
             return jsonify(latest_job), 200
 

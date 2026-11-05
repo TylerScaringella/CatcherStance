@@ -133,6 +133,15 @@ class TruMediaMatchingTests(unittest.TestCase):
 
 
 class TruMediaAdminApiTests(unittest.TestCase):
+    GAME = {
+        "id": "duke-2026-02-13-maine-1",
+        "date": "2026-02-13",
+        "opponent": "Maine",
+        "opponent_key": "maine",
+        "occurrence": 1,
+        "result": "W 5-4",
+    }
+
     def test_upload_requires_admin_authorization(self):
         client = create_app().test_client()
         response = client.post("/api/integrations/trumedia/session")
@@ -167,7 +176,9 @@ class TruMediaAdminApiTests(unittest.TestCase):
 
     def test_run_reports_auth_required_without_starting_worker(self):
         client = create_app().test_client()
-        with patch("backend.routes.resolve_game", side_effect=AuthenticationRequired("missing")):
+        with patch("backend.routes.find_game", return_value=self.GAME), patch(
+            "backend.routes.resolve_game", side_effect=AuthenticationRequired("missing")
+        ):
             response = client.post("/api/run", json={"game_id": "duke-2026-02-13-maine-1"})
         self.assertEqual(409, response.status_code)
         self.assertEqual("auth_required", response.get_json()["code"])
@@ -178,7 +189,7 @@ class TruMediaAdminApiTests(unittest.TestCase):
             "opponent_key": "maine", "url": "https://duke-ncaabaseball.trumedianetworks.com/private/game",
         }
         client = create_app().test_client()
-        with patch(
+        with patch("backend.routes.find_game", return_value=self.GAME), patch(
             "backend.routes.resolve_game",
             return_value=MatchResult("match_required", None, [candidate]),
         ):
@@ -192,7 +203,9 @@ class TruMediaAdminApiTests(unittest.TestCase):
             "opponent_key": "maine", "url": "https://duke-ncaabaseball.trumedianetworks.com/baseball/game/1",
         }
         client = create_app().test_client()
-        with patch("backend.routes.resolve_game", return_value=MatchResult("matched", match, [match])), patch(
+        with patch("backend.routes.find_game", return_value=self.GAME), patch(
+            "backend.routes.resolve_game", return_value=MatchResult("matched", match, [match])
+        ), patch(
             "backend.routes.list_runs", return_value=[]
         ), patch("backend.routes.write_job_state"), patch("backend.routes.threading.Thread.start"):
             response = client.post("/api/run", json={"game_id": "duke-2026-02-13-maine-1"})
