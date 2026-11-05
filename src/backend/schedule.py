@@ -145,6 +145,25 @@ class DukeScheduleProvider(ScheduleProvider):
 PROVIDERS: dict[str, ScheduleProvider] = {DEFAULT_TEAM: DukeScheduleProvider()}
 
 
+def validate_duke_schedule_payload(payload: object, season: int) -> dict:
+    if not isinstance(payload, dict) or int(payload.get("season") or 0) != season:
+        raise ValueError("schedule payload does not match the requested season")
+    games = payload.get("games")
+    if not isinstance(games, list) or not games:
+        raise ValueError("schedule payload contains no games")
+    if not any(
+        game.get("site") == "home" and "durham" in str(game.get("location") or "").lower()
+        for game in games
+        if isinstance(game, dict)
+    ):
+        raise ValueError("schedule payload is not a Duke home schedule")
+    if len(games) >= 20 and not any(
+        bool(game.get("conference")) for game in games if isinstance(game, dict)
+    ):
+        raise ValueError("schedule payload has no Duke conference games")
+    return payload
+
+
 def validate_season(value: int | str) -> int:
     try:
         season = int(value)
@@ -185,19 +204,29 @@ def load_schedule(
         raise ValueError("unknown team")
     cache = schedule_cache_path(team_id, season)
     if cache.exists() and not refresh:
-        return json.loads(cache.read_text(encoding="utf-8"))
+        try:
+            return validate_duke_schedule_payload(
+                json.loads(cache.read_text(encoding="utf-8")), season
+            )
+        except (OSError, json.JSONDecodeError, ValueError):
+            cache.unlink(missing_ok=True)
     try:
-        payload = provider.fetch(season)
+        payload = validate_duke_schedule_payload(provider.fetch(season), season)
         atomic_write_json(cache, payload)
         return payload
     except Exception:
         if cache.exists():
-            payload = json.loads(cache.read_text(encoding="utf-8"))
-            payload["stale"] = True
-            return payload
+            try:
+                payload = validate_duke_schedule_payload(
+                    json.loads(cache.read_text(encoding="utf-8")), season
+                )
+                payload["stale"] = True
+                return payload
+            except (OSError, json.JSONDecodeError, ValueError):
+                cache.unlink(missing_ok=True)
         fallback = _checked_in_fallback(season)
         if fallback is not None:
-            return fallback
+            return validate_duke_schedule_payload(fallback, season)
         raise
 
 
