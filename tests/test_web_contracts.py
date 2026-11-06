@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from backend.app import create_app
 from project_paths import WEB_DIR
@@ -39,24 +40,26 @@ class WebContractTests(unittest.TestCase):
         self.assertNotIn("innerHTML", script)
 
     def test_static_and_run_routes_smoke(self):
-        client = create_app().test_client()
-        for path in (
-            "/",
-            "/styles.css",
-            "/app.js",
-            "/fonts/barlow-condensed-700.woff2",
-            "/api/schedule",
-            "/api/teams",
-            "/api/teams/duke/seasons",
-            "/api/teams/duke/schedule?season=2026",
-            "/api/integrations/trumedia/status",
-            "/api/runs",
-            "/api/runs?view=summary",
-        ):
-            with self.subTest(path=path):
-                response = client.get(path)
-                self.assertEqual(200, response.status_code)
-                response.close()
+        schedule_payload = {"team": "Duke", "season": 2026, "games": []}
+        with patch("backend.routes.completed_schedule", return_value=schedule_payload):
+            client = create_app().test_client()
+            for path in (
+                "/",
+                "/styles.css",
+                "/app.js",
+                "/fonts/barlow-condensed-700.woff2",
+                "/api/schedule",
+                "/api/teams",
+                "/api/teams/duke/seasons",
+                "/api/teams/duke/schedule?season=2026",
+                "/api/integrations/trumedia/status",
+                "/api/runs",
+                "/api/runs?view=summary",
+            ):
+                with self.subTest(path=path):
+                    response = client.get(path)
+                    self.assertEqual(200, response.status_code)
+                    response.close()
 
 
 if __name__ == "__main__":

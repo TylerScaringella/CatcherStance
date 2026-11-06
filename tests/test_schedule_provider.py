@@ -73,7 +73,7 @@ class DukeScheduleProviderTests(unittest.TestCase):
                 for day in range(1, 22)
             ],
         }
-        with self.assertRaisesRegex(ValueError, "not a Duke home schedule"):
+        with self.assertRaisesRegex(schedule.ScheduleIdentityError, "not a Duke home schedule"):
             schedule.validate_duke_schedule_payload(payload, 2026)
 
     def test_invalid_cache_is_removed_and_refetched(self):
