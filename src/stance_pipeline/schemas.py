@@ -62,6 +62,8 @@ class EventAnchor:
     source: str
     trajectory_start_frame: int | None = None
     trajectory_length: int = 0
+    uncertainty_frames: int = 0
+    event_type: str = "plate_arrival"
 
 
 @dataclass

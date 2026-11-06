@@ -15,3 +15,7 @@ benchmark can be regenerated after downloading the optional BaseballCV assets:
 ```bash
 PYTHONPATH=src python research/scripts/benchmark_staged_pipeline.py
 ```
+
+For model quality and grouped evaluation, use `research/scripts/audit_model.py` instead of
+the historical notebook holdout. Generated features use the canonical path
+`data/processed/dataset/keypoints-labeled.csv`.

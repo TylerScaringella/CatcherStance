@@ -80,10 +80,20 @@ class StanceClassifier:
         )
 
     def predict(self, features: np.ndarray) -> tuple[str, float]:
-        scaled = self.scaler.transform(np.asarray([features], dtype=np.float32))
+        return self.predict_batch(np.asarray([features], dtype=np.float32))[0]
+
+    def predict_batch(self, features: np.ndarray) -> list[tuple[str, float]]:
+        matrix = np.asarray(features, dtype=np.float32)
+        if matrix.ndim == 1:
+            matrix = matrix.reshape(1, -1)
+        scaled = self.scaler.transform(matrix)
         tensor = torch.tensor(scaled, dtype=torch.float32)
         with torch.no_grad():
             logits = self.model(tensor)
-            probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
-        idx = int(np.argmax(probs))
-        return str(self.label_encoder.inverse_transform([idx])[0]), float(probs[idx])
+            probs = torch.softmax(logits, dim=1).cpu().numpy()
+        indices = np.argmax(probs, axis=1)
+        labels = self.label_encoder.inverse_transform(indices)
+        return [
+            (str(label), float(probabilities[index]))
+            for label, probabilities, index in zip(labels, probs, indices)
+        ]

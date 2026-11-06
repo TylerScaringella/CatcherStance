@@ -10,7 +10,12 @@ from unittest.mock import patch
 import numpy as np
 
 from project_paths import CLASSIFIER_METADATA_PATH
-from stance_pipeline.analyzer import PitchStanceConfig, RollingMLPClassifier, YOLOCatcherPoseExtractor
+from stance_pipeline.analyzer import (
+    PitchStanceConfig,
+    RollingMLPClassifier,
+    YOLOCatcherPoseExtractor,
+    select_plate_arrival_frame,
+)
 from stance_pipeline.assets import MODEL_ASSETS, resolve_model_asset
 from stance_pipeline.model import StanceClassifier
 from stance_pipeline.schemas import PitchStanceResult
@@ -22,6 +27,34 @@ class PipelineContractTests(unittest.TestCase):
         classifier = StanceClassifier()
         self.assertEqual(metadata["feature_count"], classifier.scaler.n_features_in_)
         self.assertEqual(metadata["class_order"], list(classifier.label_encoder.classes_))
+
+    def test_classifier_batch_predictions_match_scalar_predictions(self):
+        classifier = StanceClassifier()
+        features = np.zeros((3, classifier.scaler.n_features_in_), dtype=np.float32)
+        self.assertEqual(
+            [classifier.predict(row) for row in features],
+            classifier.predict_batch(features),
+        )
+
+    def test_plate_arrival_prefers_closest_frame_inside_plate_zone(self):
+        index, event_type = select_plate_arrival_frame(
+            [10, 20, 30],
+            np.asarray([[0.1, 0.1], [0.5, 0.5], [0.9, 0.9]]),
+            np.asarray([0.52, 0.52]),
+            0.10,
+        )
+        self.assertEqual(1, index)
+        self.assertEqual("plate_arrival", event_type)
+
+    def test_plate_arrival_falls_back_to_trajectory_endpoint_outside_zone(self):
+        index, event_type = select_plate_arrival_frame(
+            [10, 20, 30],
+            np.asarray([[0.1, 0.1], [0.5, 0.5], [0.9, 0.9]]),
+            np.asarray([0.2, 0.2]),
+            0.05,
+        )
+        self.assertEqual(2, index)
+        self.assertEqual("trajectory_endpoint", event_type)
 
     def test_external_assets_have_checksums_and_environment_overrides(self):
         for asset in MODEL_ASSETS.values():

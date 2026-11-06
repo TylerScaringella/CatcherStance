@@ -93,6 +93,14 @@ def detect_stance_for_row(
             if result.feature_vector is not None
             else ""
         )
+        diagnostics = result.diagnostics or {}
+        event_type = diagnostics.get("event_type")
+        event_uncertainty = diagnostics.get("event_uncertainty_frames")
+        quality_flags = list(result.quality_flags)
+        if event_type:
+            quality_flags.append(f"event_anchor:{event_type}")
+        if event_uncertainty:
+            quality_flags.append(f"event_uncertainty_frames:{int(event_uncertainty)}")
         feature = PitchFeature("", clip_id, features, status)
         detection = PitchDetection(
             pitch_index=pitch_index,
@@ -115,7 +123,7 @@ def detect_stance_for_row(
             valid_frame_count=result.valid_frame_count,
             vote_distribution=json.dumps(result.vote_distribution, sort_keys=True),
             detector_provenance=",".join(result.detector_provenance),
-            quality_flags=",".join(result.quality_flags),
+            quality_flags=",".join(quality_flags),
             accepted=result.accepted,
             rejection_reason=result.rejection_reason or "",
             camera_quality=result.camera_quality,

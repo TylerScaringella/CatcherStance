@@ -161,7 +161,21 @@ RUN_BROWSER_TESTS=1 PYTHONPATH=src ./.venv/bin/python \
 
 ## Evaluation
 
-The final MLP classifier was evaluated on a held-out validation set of 374 labeled pitch clips.
+The checked-in MLP results below are historical notebook measurements from an unstratified
+row-wise holdout. They are retained for reproducibility, but are not the production quality
+claim: the current audit uses source-group-aware splits and a canonical generated dataset.
+
+Run the reproducible audit with:
+
+```bash
+PYTHONPATH=src ./.venv/bin/python research/scripts/audit_model.py
+```
+
+The audit currently reports 2,489 usable feature rows from 488 source groups: 2,196
+`Knee-down Right`, 289 `Knee-down Left`, and 4 `Squat`. Grouped evaluation has only five
+splits containing every class, so Squat is treated as insufficiently supported for promotion.
+The checked-in MLP is not replaced until a balanced, event-annotated holdout supports the
+promotion rule.
 
 | Class | Precision | Recall | F1-score | Support |
 | --- | ---: | ---: | ---: | ---: |
