@@ -458,6 +458,21 @@ body {
   background-size: 32px 32px;
 }
 
+.workspace-context {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  color: #6f8195;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.workspace-context-brand { color: var(--duke); }
+.workspace-context-separator { color: #b5c3d0; }
+.workspace-context-detail { margin-left: auto; color: #8b9bad; letter-spacing: .08em; }
+
 .app-header {
   min-height: 70px;
   border-bottom: 1px solid rgba(255,255,255,.14);
@@ -497,7 +512,7 @@ body {
 .badge { min-height: 23px; padding: 2px 7px; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
 
 .game-hero {
-  min-height: 242px;
+  min-height: 270px;
   padding: 38px;
   background:
     linear-gradient(110deg, rgba(10,31,57,.98), rgba(20,57,87,.96)),
@@ -505,6 +520,10 @@ body {
 }
 .game-hero h2 { max-width: 620px; font-size: clamp(48px, 6vw, 82px); }
 .game-line { color: #bfd2e5; }
+.game-hero > div:first-child { position: relative; z-index: 1; }
+.hero-facts { position: relative; z-index: 1; display: grid; gap: 3px; min-width: 150px; align-self: end; padding: 12px 0 2px 18px; border-left: 1px solid rgba(255,255,255,.25); color: white; }
+.hero-facts span { font-family: "Barlow Condensed", sans-serif; font-size: 30px; font-weight: 700; }
+.hero-facts small { color: #a9c8e7; font-size: 11px; }
 .game-hero .button.primary { color: var(--navy-950); background: #f8fbff; border-color: #f8fbff; }
 .game-hero .button.hero-secondary { color: white; background: transparent; border-color: rgba(255,255,255,.5); }
 .context-kicker, .run-context-line { display: flex; align-items: center; gap: 8px; }
@@ -547,6 +566,8 @@ body {
 .confidence-track { height: 6px; }
 .set-window { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .row-action { font-size: 13px; }
+.results-page .metrics-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.results-page .metric-card strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .dialog-header { padding: 21px 24px; border-bottom: 1px solid var(--line); }
 .dialog-header h2 { font-size: 38px; }
@@ -558,9 +579,13 @@ body {
 .detail-section h3 { font-size: 21px; }
 
 @media (max-width: 760px) {
+  .workspace-context { gap: 7px; margin-bottom: 10px; font-size: 9px; }
+  .workspace-context-detail { display: none; }
   .page { padding-top: 26px; }
   .schedule-card { grid-template-columns: 72px minmax(0,1fr) auto; grid-template-areas: "date opponent badge" "date meta badge" "date link badge"; }
   .game-context-strip { grid-template-columns: 1fr; gap: 10px; padding: 16px 18px; }
+  .hero-facts { min-width: 0; align-self: start; padding: 10px 0 0; border-top: 1px solid rgba(255,255,255,.25); border-left: 0; }
+  .hero-facts span { font-size: 25px; }
   .context-connector { display: none; }
   .context-step { grid-template-columns: 104px minmax(0,1fr); align-items: center; }
   .context-step .context-label { grid-column: 1; grid-row: 1; }
@@ -573,4 +598,5 @@ body {
   .result-row > :nth-child(4) { grid-area: window; }
   .result-row > :nth-child(5) { grid-area: quality; justify-self: end; }
   .result-row > :nth-child(6) { grid-area: action; }
+  .results-page .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

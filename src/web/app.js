@@ -311,6 +311,15 @@ function pageHeader(kicker, title, description, actions = []) {
   ]);
 }
 
+function workspaceContext(section, detail = "2026 season") {
+  return element("div", { className: "workspace-context", "aria-label": "Workspace context" }, [
+    element("span", { className: "workspace-context-brand", text: "DUKE BASEBALL / FILM ROOM" }),
+    element("span", { className: "workspace-context-separator", "aria-hidden": "true", text: "/" }),
+    element("span", { text: section }),
+    element("span", { className: "workspace-context-detail", text: detail }),
+  ]);
+}
+
 function progressBar(run) {
   const progress = run.progress || {};
   const percent = progress.percent == null ? null : Number(progress.percent);
@@ -484,6 +493,7 @@ function renderGames() {
   ].map(([value, text]) => element("option", { value, text, selected: state.gameFilter === value })));
 
   const section = element("section", { className: "page" });
+  section.append(workspaceContext("Game operations", `${state.season} season`));
   const seasonSelect = element("select", {
     className: "season-select", "aria-label": "Schedule season",
     on: { change: async (event) => {
@@ -540,6 +550,10 @@ function renderGames() {
           ]),
           element("h2", { text: game.opponent }),
           element("p", { className: "game-line", text: `${formatDate(game.date)} · ${game.location}` }),
+        ]),
+        element("div", { className: "hero-facts" }, [
+          element("span", { text: game.result || "Scheduled" }),
+          element("small", { text: run ? `${run.result_count || 0} pitches in evidence` : "No analysis run yet" }),
         ]),
         runAction,
       ]),
@@ -642,6 +656,7 @@ function renderRuns() {
     return activeDifference || Number(b.updated_at || 0) - Number(a.updated_at || 0);
   });
   const section = element("section", { className: "page" });
+  section.append(workspaceContext("Run control", `${activeRuns().length} active`));
   section.append(pageHeader(
     "Processing",
     "Run activity",
@@ -834,6 +849,7 @@ function renderResults(runId) {
   const rows = filteredResultRows(run);
 
   const section = element("section", { className: "page results-page" });
+  section.append(workspaceContext("Pitch evidence", run.game?.opponent || "Selected game"));
   section.append(pageHeader(
     run.read_only ? "Sample analysis" : run.results_complete ? "Completed analysis" : "Live analysis",
     `${run.game?.opponent || "Run"} results`,
