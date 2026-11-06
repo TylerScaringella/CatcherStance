@@ -66,6 +66,27 @@ const pitchDialogContent = document.querySelector("#pitchDialogContent");
 const workflowDialog = document.querySelector("#workflowDialog");
 const workflowDialogContent = document.querySelector("#workflowDialogContent");
 
+function stanceKey(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized.includes("left") || normalized === "lkd") return "LKD";
+  if (normalized.includes("right") || normalized === "rkd") return "RKD";
+  if (normalized.includes("squat")) return "Squat";
+  return "Abstained";
+}
+
+function stanceLabel(value) {
+  return {
+    LKD: "Knee-down Left",
+    RKD: "Knee-down Right",
+    Squat: "Squat",
+    Abstained: "Abstained",
+  }[stanceKey(value)] || String(value || "Abstained");
+}
+
+function resultAttention(row) {
+  return Boolean(row.quality_flags?.length || !row.accepted);
+}
+
 function route() {
   const parts = (location.hash || "#/games").slice(2).split("/").filter(Boolean);
   return { view: parts[0] || "games", id: parts[1] || null };
@@ -415,6 +436,7 @@ function gameCard(game) {
     element("span", { className: "schedule-date", text: formatDate(game.date).replace(", 2026", "") }),
     element("span", { className: "schedule-opponent", text: game.opponent }),
     element("span", { className: "schedule-meta", text: `${game.location} · ${game.result || "Scheduled"}` }),
+    element("span", { className: "schedule-link", text: run ? `${run.result_count || 0} pitches` : "Ready for analysis" }),
     run ? runBadge(run) : badge("Not run"),
   ]);
 }
@@ -512,16 +534,30 @@ function renderGames() {
     detail.append(
       element("div", { className: "game-hero" }, [
         element("div", {}, [
-          element("p", { className: "eyebrow", text: game.conference ? "ACC matchup" : "Non-conference" }),
+          element("div", { className: "context-kicker" }, [
+            element("span", { className: "status-marker", "aria-hidden": "true" }),
+            element("span", { text: game.conference ? "ACC matchup" : "Non-conference" }),
+          ]),
           element("h2", { text: game.opponent }),
           element("p", { className: "game-line", text: `${formatDate(game.date)} · ${game.location}` }),
         ]),
         runAction,
       ]),
-      element("div", { className: "score-strip" }, [
-        element("span", { text: game.result || "Scheduled" }),
-        element("span", { text: run ? `${run.result_count || 0} pitch results` : "No analysis yet", dataset: run ? { resultCount: run.id } : undefined }),
-        run ? runBadge(run) : badge("Ready to start"),
+      element("div", { className: "game-context-strip" }, [
+        element("div", { className: "context-step" }, [
+          element("span", { className: "context-label", text: "Game" }),
+          element("strong", { text: game.result || "Scheduled" }),
+        ]),
+        element("span", { className: "context-connector", "aria-hidden": "true", text: "→" }),
+        element("div", { className: "context-step" }, [
+          element("span", { className: "context-label", text: "Analysis run" }),
+          run ? runBadge(run) : element("strong", { text: "Not started" }),
+        ]),
+        element("span", { className: "context-connector", "aria-hidden": "true", text: "→" }),
+        element("div", { className: "context-step" }, [
+          element("span", { className: "context-label", text: "Pitch evidence" }),
+          element("strong", { text: run ? `${run.result_count || 0} available` : "Not available", dataset: run ? { resultCount: run.id } : undefined }),
+        ]),
       ]),
     );
     if (run && ACTIVE.has(run.status)) detail.append(progressBar(run));
@@ -609,7 +645,7 @@ function renderRuns() {
   section.append(pageHeader(
     "Processing",
     "Run activity",
-    "Jobs continue in the background while you review games or completed results.",
+    "Track every game from media discovery through pitch-level evidence.",
     [element("button", { className: "button ghost", type: "button", text: "Refresh", on: { click: () => refreshRuns(true, true) } })],
   ));
   const grid = element("div", { className: "runs-grid" });
@@ -624,11 +660,21 @@ function renderRuns() {
     const card = element("article", { className: `run-card${ACTIVE.has(run.status) ? " active-run" : ""}`, dataset: { runId: run.id } }, [
       element("div", { className: "run-card-head" }, [
         element("div", {}, [
-          element("p", { className: "eyebrow", text: formatDate(run.game?.date) }),
+          element("div", { className: "run-context-line" }, [
+            element("span", { className: "status-marker", "aria-hidden": "true" }),
+            element("span", { className: "eyebrow", text: formatDate(run.game?.date) }),
+          ]),
           element("h2", { text: run.game?.opponent || run.id }),
           element("p", { className: "muted", text: run.game?.location || run.id }),
         ]),
         runBadge(run),
+      ]),
+      element("div", { className: "run-relationship" }, [
+        element("span", { text: "Game" }),
+        element("i", { "aria-hidden": "true" }),
+        element("span", { text: "Run" }),
+        element("i", { "aria-hidden": "true" }),
+        element("span", { text: `${run.result_count || 0} pitches` }),
       ]),
       ACTIVE.has(run.status)
         ? progressBar(run)
@@ -653,15 +699,15 @@ function renderRuns() {
 
 function resultSummary(rows) {
   const accepted = rows.filter((row) => row.accepted);
-  const count = (label) => rows.filter((row) => row.stance === label).length;
-  const flagged = rows.filter((row) => row.quality_flags?.length || !row.accepted).length;
+  const count = (label) => rows.filter((row) => stanceKey(row.stance) === label).length;
+  const flagged = rows.filter(resultAttention).length;
   const average = accepted.length
     ? accepted.reduce((sum, row) => sum + Number(row.confidence || 0), 0) / accepted.length
     : 0;
   return [
     ["Pitches", rows.length, "total"],
-    ["LKD", count("LKD"), "left knee down"],
-    ["RKD", count("RKD"), "right knee down"],
+    ["Knee-down Left", count("LKD"), "LKD model label"],
+    ["Knee-down Right", count("RKD"), "RKD model label"],
     ["Squat", count("Squat"), "traditional"],
     ["Needs attention", flagged, "flags or abstentions"],
     ["Avg. confidence", formatPercent(average), "accepted pitches"],
@@ -685,33 +731,36 @@ function filteredResultRows(run) {
   return (run.results || []).filter((row) => {
     const textMatch = `${row.clip_id} ${row.stance} ${row.status}`.toLowerCase().includes(query);
     const stanceMatch = state.stanceFilter === "all" ||
-      (state.stanceFilter === "abstained" ? !row.accepted : row.stance === state.stanceFilter);
+      (state.stanceFilter === "abstained" ? !row.accepted : stanceKey(row.stance) === state.stanceFilter);
     const qualityMatch = state.qualityFilter === "all" ||
-      (state.qualityFilter === "flagged" && (row.quality_flags?.length || !row.accepted)) ||
+      (state.qualityFilter === "flagged" && resultAttention(row)) ||
       (state.qualityFilter === "clear" && row.accepted && !row.quality_flags?.length);
     return textMatch && stanceMatch && qualityMatch;
   });
 }
 
 function resultRow(row, run) {
-  const stance = row.stance || "Abstained";
-  const quality = row.quality_flags?.length ? "Review" : row.accepted ? "Clear" : "Rejected";
+  const stance = stanceLabel(row.stance);
+  const quality = row.quality_flags?.length ? "Needs attention" : row.accepted ? "Clear" : "Rejected";
   return element("button", {
-    className: "result-row",
+    className: `result-row${resultAttention(row) ? " needs-attention" : ""}`,
     dataset: { clipId: row.clip_id },
     type: "button",
     on: { click: () => openPitch(run, row) },
   }, [
     element("span", { className: "pitch-number", text: String(row.pitch_index ?? "—").padStart(2, "0") }),
-    element("span", {}, [badge(stance, row.accepted ? "stance" : "danger")]),
+    element("span", { className: "stance-cell" }, [
+      badge(stance, row.accepted ? "stance" : "danger"),
+      ...(row.stance && row.stance !== stance ? [element("small", { text: row.stance })] : []),
+    ]),
     element("span", { className: "confidence-cell" }, [
       element("strong", { text: formatPercent(row.confidence, 1) }),
       element("span", { className: "confidence-track" }, [
         element("i", { style: `width:${Math.min(100, Number(row.confidence || 0) * 100)}%` }),
       ]),
     ]),
-    element("span", { text: `${formatTime(row.window_start_seconds)}–${formatTime(row.window_end_seconds)}` }),
-    element("span", {}, [badge(quality, quality === "Clear" ? "success" : quality === "Review" ? "warning" : "danger")]),
+    element("span", { className: "set-window", text: `${formatTime(row.window_start_seconds)}–${formatTime(row.window_end_seconds)}` }),
+    element("span", { className: "quality-cell" }, [badge(quality, quality === "Clear" ? "success" : quality === "Needs attention" ? "warning" : "danger")]),
     element("span", { className: "row-action", text: "Review →" }),
   ]);
 }
@@ -788,7 +837,7 @@ function renderResults(runId) {
   section.append(pageHeader(
     run.read_only ? "Sample analysis" : run.results_complete ? "Completed analysis" : "Live analysis",
     `${run.game?.opponent || "Run"} results`,
-    `${formatDate(run.game?.date)} · ${run.result_count} pitch-level classifications`,
+    `${run.game?.opponent || "Selected game"} · ${formatDate(run.game?.date)} · ${run.result_count} pitch classifications`,
     [
       element("button", { className: "button sheets-button", type: "button", text: "Export to GameTracker", on: { click: () => openGameTracker(run) } }),
       run.results_complete
@@ -818,7 +867,7 @@ function renderResults(runId) {
   const stance = element("select", {
     "aria-label": "Filter by stance",
     on: { change: (event) => { state.stanceFilter = event.target.value; renderResults(runId); } },
-  }, [["all", "All stances"], ["LKD", "LKD"], ["RKD", "RKD"], ["Squat", "Squat"], ["abstained", "Abstained"]]
+  }, [["all", "All stances"], ["LKD", "Knee-down Left"], ["RKD", "Knee-down Right"], ["Squat", "Squat"], ["abstained", "Abstained"]]
     .map(([value, text]) => element("option", { value, text, selected: state.stanceFilter === value })));
   const quality = element("select", {
     "aria-label": "Filter by quality",
@@ -832,7 +881,7 @@ function renderResults(runId) {
       element("span", { className: "muted results-visible-count", text: `${rows.length} of ${run.results?.length || 0} pitches` }),
     ]),
     element("div", { className: "result-table-head" }, [
-      "Pitch", "Stance", "Confidence", "Set window", "Quality", "",
+      "Pitch", "Classification", "Confidence", "Set window", "Evidence", "",
     ].map((text) => element("span", { text }))),
     element("div", { className: "result-list" },
       rows.length ? rows.map((row) => resultRow(row, run)) : [element("div", { className: "empty-state", text: "No pitches match these filters." })]),
@@ -891,9 +940,9 @@ function openPitch(run, row) {
   clear(pitchDialogContent).append(
     element("header", { className: "dialog-header" }, [
       element("div", {}, [
-        element("p", { className: "eyebrow", text: `Pitch ${row.pitch_index}` }),
-        element("h2", { id: "pitchDialogTitle", text: row.stance || "Abstained pitch" }),
-        element("p", { className: "muted", text: row.clip_id }),
+        element("p", { className: "eyebrow", text: `${run.game?.opponent || "Game review"} · Pitch ${row.pitch_index}` }),
+        element("h2", { id: "pitchDialogTitle", text: stanceLabel(row.stance) }),
+        element("p", { className: "muted", text: `${formatDate(run.game?.date)} · ${row.clip_id}` }),
       ]),
       close,
     ]),
@@ -926,6 +975,10 @@ function openPitch(run, row) {
           ...(row.quality_flags?.length ? row.quality_flags.map((flag) => badge(statusLabel(flag), "warning")) : [badge("No quality flags", "success")]),
           ...(row.detector_provenance || []).map((item) => badge(statusLabel(item), "neutral")),
         ]),
+      ]),
+      element("section", { className: "detail-section" }, [
+        element("h3", { text: "Review action" }),
+        element("p", { className: "muted", text: resultAttention(row) ? "This pitch needs analyst attention before it is treated as a clear classification." : "This pitch is ready for review or export." }),
       ]),
     ]),
   );
