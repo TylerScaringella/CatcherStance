@@ -139,6 +139,27 @@ def run_file(location: RunLocation, filename: str) -> Path:
     return ensure_contained(location.path / filename, location.path)
 
 
+def run_state_dir(run_id: str, create: bool = False) -> Path:
+    location = live_run(run_id, create=create)
+    path = ensure_contained(location.path / "state", location.path)
+    if create:
+        path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def pitch_state_dir(run_id: str, create: bool = False) -> Path:
+    path = ensure_contained(run_state_dir(run_id, create=create) / "pitches", live_run(run_id).path)
+    if create:
+        path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def pitch_state_file(run_id: str, clip_id: str, create_parent: bool = False) -> Path:
+    validate_identifier(clip_id, "clip id")
+    directory = pitch_state_dir(run_id, create=create_parent)
+    return ensure_contained(directory / f"{clip_id}.json", live_run(run_id).path)
+
+
 def run_lock(run_id: str) -> threading.RLock:
     validate_identifier(run_id, "run id")
     with _LOCKS_GUARD:

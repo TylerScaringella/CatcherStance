@@ -70,7 +70,7 @@ class PipelineContractTests(unittest.TestCase):
                 f"pitch-1,{video_path},downloaded\n",
                 encoding="utf-8",
             )
-            with patch("stance_pipeline.detect.analyze_pitch_clip", return_value=result):
+            with patch("stance_pipeline.detect.PitchStanceAnalyzer.analyze", return_value=result):
                 detections, features = detect_stances_for_manifest(manifest_path)
         self.assertEqual("LKD", detections[0].stance)
         self.assertEqual(100, detections[0].impact_frame)

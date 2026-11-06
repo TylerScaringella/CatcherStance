@@ -15,6 +15,7 @@ from .storage import (
     atomic_write_text,
     list_run_locations,
     live_run,
+    pitch_state_dir,
     resolve_manifest_media,
     resolve_run,
     run_lock,
@@ -26,6 +27,12 @@ ACTIVE_STATUSES = {
     "queued", "running", "resolving_game", "discovering_pitches", "downloading",
     "detecting", "building_review", "cleaning_up", "finalizing",
 }
+PROGRESS_STAGES = (
+    "discovering_pitches",
+    "downloading",
+    "detecting",
+    "building_review",
+)
 
 
 def _read_json(path: Path, default):
@@ -48,6 +55,40 @@ def _number(value, cast=float):
         return cast(value)
     except (TypeError, ValueError):
         return None
+
+
+def _performance_summary(
+    progress: dict | None,
+    result_count: int,
+    expected: int,
+    created_at: float,
+    updated_at: float,
+    status: str,
+) -> dict:
+    elapsed = max(
+        0.0,
+        (time.time() if status in ACTIVE_STATUSES else updated_at) - created_at,
+    )
+    detecting_stage = dict((progress or {}).get("stages", {}).get("detecting") or {})
+    detected = int(
+        detecting_stage.get("current")
+        or ((progress or {}).get("current") if (progress or {}).get("phase") == "detecting" else 0)
+        or result_count
+    )
+    detection_started = float(detecting_stage.get("started_at") or created_at)
+    detection_ended = float(
+        detecting_stage.get("completed_at")
+        or (time.time() if status in ACTIVE_STATUSES else updated_at)
+    )
+    detection_elapsed = max(0.0, detection_ended - detection_started)
+    rate = detected / (detection_elapsed / 60) if detected and detection_elapsed > 0 else None
+    eta = ((expected - detected) / rate * 60) if rate and expected > detected else None
+    return {
+        "elapsed_seconds": round(elapsed, 1),
+        "detection_elapsed_seconds": round(detection_elapsed, 1),
+        "pitches_per_minute": round(rate, 2) if rate else None,
+        "eta_seconds": round(eta, 1) if eta is not None else None,
+    }
 
 
 @lru_cache(maxsize=256)
@@ -78,7 +119,7 @@ def normalize_result(row: dict, location: RunLocation | None = None) -> dict:
     if fps is None and location is not None:
         try:
             media = resolve_manifest_media(location, str(result.get("video_path") or ""))
-            fps = _video_fps(str(media))
+            fps = _video_fps(str(media)) if media.is_file() else None
         except (ValueError, OSError):
             fps = None
 
@@ -118,6 +159,10 @@ def normalize_result(row: dict, location: RunLocation | None = None) -> dict:
             "quality_flags": _split_csv(result.get("quality_flags")),
         }
     )
+    for private_key in (
+        "video_path", "saved_path", "download_url", "s3_url", "media_ref", "error",
+    ):
+        result.pop(private_key, None)
     return result
 
 
@@ -129,12 +174,13 @@ def write_job_state(job: dict) -> None:
 
 
 def set_job(job_id: str, **updates) -> None:
-    with JOBS_LOCK:
-        current = JOBS.setdefault(job_id, {"id": job_id})
-        current.update(updates)
-        current["updated_at"] = time.time()
-        job = dict(current)
-    write_job_state(job)
+    with run_lock(job_id):
+        with JOBS_LOCK:
+            current = JOBS.setdefault(job_id, {"id": job_id})
+            current.update(updates)
+            current["updated_at"] = time.time()
+            job = dict(current)
+        write_job_state(job)
 
 
 def set_job_progress(
@@ -142,22 +188,74 @@ def set_job_progress(
     message: str,
     current: int | None = None,
     total: int | None = None,
+    phase: str | None = None,
+    activate: bool = True,
 ) -> None:
     lowered = message.lower()
-    phase = (
-        "discovering_pitches" if "discover" in lowered
+    resolved_phase = phase or (
+        "building_review" if "review" in lowered
+        else "discovering_pitches" if "discover" in lowered
         else "downloading" if "download" in lowered
         else "detecting"
     )
-    updates = {"status": phase, "phase": phase, "message": message}
-    if current is not None and total is not None:
-        updates["progress"] = {
-            "phase": phase,
-            "current": current,
-            "total": total,
-            "percent": round((current / total) * 100, 1) if total else 0,
-        }
-    set_job(job_id, **updates)
+    now = time.time()
+    with run_lock(job_id):
+        with JOBS_LOCK:
+            current_job = JOBS.setdefault(job_id, {"id": job_id})
+            previous = current_job.get("progress") if isinstance(current_job.get("progress"), dict) else {}
+            stage_rank = {stage: index for index, stage in enumerate(PROGRESS_STAGES)}
+            previous_active = previous.get("active_stage")
+            if (
+                activate
+                and previous_active in stage_rank
+                and resolved_phase in stage_rank
+                and stage_rank[resolved_phase] < stage_rank[previous_active]
+            ):
+                activate = False
+            stages = dict(previous.get("stages") or {})
+            previous_stage = dict(stages.get(resolved_phase) or {})
+            stage_current = current if current is not None else previous_stage.get("current")
+            stage_total = total if total is not None else previous_stage.get("total")
+            percent = (
+                round((stage_current / stage_total) * 100, 1)
+                if stage_current is not None and stage_total
+                else None
+            )
+            stage_status = "complete" if percent is not None and percent >= 100 else "active"
+            stages[resolved_phase] = {
+                **previous_stage,
+                "status": stage_status,
+                "current": stage_current,
+                "total": stage_total,
+                "percent": percent,
+                "started_at": previous_stage.get("started_at") or now,
+                "updated_at": now,
+                **({"completed_at": now} if stage_status == "complete" else {}),
+            }
+            active_stage = resolved_phase if activate else previous.get("active_stage", resolved_phase)
+            active_data = stages.get(active_stage, {})
+            current_job.update(
+                status=active_stage,
+                phase=active_stage,
+                message=message if activate else current_job.get("message", message),
+                progress={
+                    "active_stage": active_stage,
+                    "phase": active_stage,
+                    "current": active_data.get("current"),
+                    "total": active_data.get("total"),
+                    "percent": active_data.get("percent"),
+                    "stages": stages,
+                },
+                updated_at=now,
+            )
+            job = dict(current_job)
+        write_job_state(job)
+
+
+def begin_job_stage(job_id: str, phase: str, message: str, total: int | None = None) -> None:
+    if phase not in PROGRESS_STAGES:
+        raise ValueError("unknown progress phase")
+    set_job_progress(job_id, message, 0 if total is not None else None, total, phase=phase)
 
 
 def load_results(location_or_id: RunLocation | str) -> list[dict]:
@@ -168,7 +266,23 @@ def load_results(location_or_id: RunLocation | str) -> list[dict]:
     )
     if location is None:
         return []
-    rows = _read_json(location.path / "detections.json", [])
+    canonical = _read_json(location.path / "detections.json", [])
+    saved = _read_json(location.path / "job.json", {})
+    canonical_complete = location.read_only or saved.get("status") == "complete"
+    rows = canonical if canonical_complete else []
+    if not rows and not location.read_only:
+        state_directory = pitch_state_dir(location.run_id)
+        partial_rows = []
+        if state_directory.is_dir():
+            for path in state_directory.glob("*.json"):
+                payload = _read_json(path, {})
+                if isinstance(payload.get("detection"), dict):
+                    partial_rows.append(payload["detection"])
+        partial_rows = sorted(
+            partial_rows,
+            key=lambda row: int(row.get("pitch_index") or 0),
+        )
+        rows = partial_rows
     return [normalize_result(row, location) for row in rows if isinstance(row, dict)]
 
 
@@ -211,6 +325,18 @@ def manifest_counts(location_or_id: RunLocation | str) -> dict[str, int]:
             counts["pending"] += 1
         elif status in counts:
             counts[status] += 1
+    return counts
+
+
+def _declared_manifest_counts(location: RunLocation) -> dict[str, int]:
+    counts = {
+        "total": 0, "downloaded": 0, "cleaned": 0, "pending": 0, "failed": 0,
+        "skipped": 0,
+    }
+    for row in manifest_rows(location):
+        counts["total"] += 1
+        status = str(row.get("status") or "pending")
+        counts[status if status in counts else "pending"] += 1
     return counts
 
 
@@ -295,16 +421,28 @@ def job_from_location(location: RunLocation) -> dict | None:
         "result_count": len(results),
     }
 
-    if results:
+    results_complete = (location.path / "detections.json").is_file() and (
+        location.read_only or saved.get("status") == "complete"
+    )
+    job["expected_result_count"] = int(
+        saved.get("expected_result_count")
+        or saved.get("discovery", {}).get("downloadable_pitches", 0)
+        or counts["total"]
+    )
+    job["results_complete"] = results_complete
+    if results and results_complete:
+        saved_stages = dict((job.get("progress") or {}).get("stages") or {})
         job.update(
             status="complete",
             phase="complete",
             message=f"Detection complete for {len(results)} pitches",
             progress={
+                "active_stage": "complete",
                 "phase": "complete",
                 "current": len(results),
                 "total": len(results),
                 "percent": 100,
+                "stages": saved_stages,
             },
         )
     elif counts["total"] > 0:
@@ -320,40 +458,65 @@ def job_from_location(location: RunLocation) -> dict | None:
                     phase="ready",
                     message="Videos downloaded and ready for detection",
                 )
-            job["progress"] = {
-                "phase": job["phase"],
-                "current": available,
-                "total": counts["total"],
-                "percent": 100,
-            }
+            saved_progress = saved.get("progress")
+            if job["phase"] in {"detecting", "building_review"} and isinstance(saved_progress, dict):
+                job["progress"] = saved_progress
+            else:
+                job["progress"] = {
+                    "active_stage": job["phase"],
+                    "phase": job["phase"],
+                    "current": available,
+                    "total": counts["total"],
+                    "percent": 100,
+                    "stages": dict((saved_progress or {}).get("stages") or {}),
+                }
         else:
             recent = time.time() - updated_at < 600
             status = saved.get("status") if recent else "interrupted"
             if status not in ACTIVE_STATUSES and status != "auth_required":
                 status = "interrupted"
-            job.update(
-                status=status,
-                phase="auth_required" if status == "auth_required" else "downloading",
-                message=(
-                    "TruMedia authentication must be refreshed before this run can continue."
-                    if status == "auth_required"
-                    else f"Downloading videos: {counts['downloaded']} of {counts['total']}"
-                    if status != "interrupted"
-                    else f"Partial run: {counts['downloaded']} of {counts['total']} downloaded"
-                ),
-                progress={
-                    "phase": "downloading",
-                    "current": counts["downloaded"],
-                    "total": counts["total"],
-                    "percent": round(counts["downloaded"] / counts["total"] * 100, 1),
-                },
-            )
+            saved_progress = saved.get("progress")
+            if status in {"detecting", "building_review"} and isinstance(saved_progress, dict):
+                job.update(
+                    status=status,
+                    phase=saved.get("phase", status),
+                    message=saved.get("message") or "Running catcher detection",
+                    progress=saved_progress,
+                )
+            else:
+                job.update(
+                    status=status,
+                    phase="auth_required" if status == "auth_required" else "downloading",
+                    message=(
+                        "TruMedia authentication must be refreshed before this run can continue."
+                        if status == "auth_required"
+                        else f"Downloading videos: {counts['downloaded']} of {counts['total']}"
+                        if status != "interrupted"
+                        else f"Partial run: {counts['downloaded']} of {counts['total']} downloaded"
+                    ),
+                    progress={
+                        "active_stage": "downloading",
+                        "phase": "downloading",
+                        "current": counts["downloaded"],
+                        "total": counts["total"],
+                        "percent": round(counts["downloaded"] / counts["total"] * 100, 1),
+                        "stages": dict((saved_progress or {}).get("stages") or {}),
+                    },
+                )
     elif location.source == "live" and saved:
         job.setdefault("status", "queued")
         job.setdefault("phase", job["status"])
         job.setdefault("message", "Queued")
     else:
         return None
+    job["performance"] = _performance_summary(
+        job.get("progress"),
+        len(results),
+        job["expected_result_count"],
+        created_at,
+        updated_at,
+        str(job.get("status") or "queued"),
+    )
     return job
 
 
@@ -364,6 +527,86 @@ def list_runs() -> list[dict]:
         if (job := job_from_location(location)) is not None
     ]
     return sorted(jobs, key=lambda job: float(job.get("updated_at") or 0), reverse=True)
+
+
+def _result_count_from_disk(location: RunLocation) -> int:
+    canonical = location.path / "detections.json"
+    canonical_count = 0
+    if canonical.is_file():
+        rows = _read_json(canonical, [])
+        canonical_count = len(rows) if isinstance(rows, list) else 0
+    if location.read_only:
+        return canonical_count
+    saved = _read_json(location.path / "job.json", {})
+    if saved.get("status") == "complete":
+        return canonical_count
+    directory = pitch_state_dir(location.run_id)
+    state_count = len(list(directory.glob("*.json"))) if directory.is_dir() else 0
+    return state_count
+
+
+def job_summary_from_location(location: RunLocation) -> dict | None:
+    saved = _read_json(location.path / "job.json", {})
+    game = _game_for_location(location, saved)
+    if game is None:
+        return None
+    counts = _declared_manifest_counts(location)
+    result_count = _result_count_from_disk(location)
+    created_at = float(saved.get("created_at") or location.path.stat().st_mtime)
+    updated_at = max(float(saved.get("updated_at") or 0), location.path.stat().st_mtime)
+    status = str(saved.get("status") or "queued")
+    phase = str(saved.get("phase") or status)
+    message = str(saved.get("message") or status)
+    canonical_results = (location.path / "detections.json").is_file() and (
+        location.read_only or saved.get("status") == "complete"
+    )
+    results_complete = canonical_results
+
+    if canonical_results or (result_count and location.read_only):
+        status = phase = "complete"
+        message = f"Detection complete for {result_count} pitches"
+        results_complete = True
+    elif status in ACTIVE_STATUSES and time.time() - updated_at >= 600:
+        status = phase = "interrupted"
+        message = "Processing was interrupted and can be resumed"
+
+    progress = saved.get("progress") if isinstance(saved.get("progress"), dict) else None
+    expected = int(
+        saved.get("expected_result_count")
+        or saved.get("discovery", {}).get("downloadable_pitches", 0)
+        or counts["total"]
+    )
+    return {
+        "id": location.run_id,
+        "game": game,
+        "source": location.source,
+        "read_only": location.read_only,
+        "status": status,
+        "phase": phase,
+        "message": message,
+        "revision": saved.get("revision"),
+        "retain_sources": bool(saved.get("retain_sources", False)),
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "manifest": counts,
+        "result_count": result_count,
+        "expected_result_count": expected,
+        "results_complete": results_complete,
+        "progress": progress,
+        "performance": _performance_summary(
+            progress, result_count, expected, created_at, updated_at, status
+        ),
+        "cleanup": saved.get("cleanup"),
+    }
+
+
+def list_run_summaries() -> list[dict]:
+    summaries = [
+        summary
+        for location in list_run_locations()
+        if (summary := job_summary_from_location(location)) is not None
+    ]
+    return sorted(summaries, key=lambda job: float(job.get("updated_at") or 0), reverse=True)
 
 
 def latest_job_for_game(game_id: str) -> dict | None:
@@ -425,16 +668,17 @@ def run_existing_detection_job(job_id: str) -> None:
     try:
         from pipeline import run_detection_for_existing_run
 
-        set_job(job_id, status="detecting", phase="detecting", message="Preparing stance detection")
+        begin_job_stage(job_id, "detecting", "Preparing stance detection")
         rows = run_detection_for_existing_run(
             run_id=job_id,
-            status_callback=lambda message, current, total: set_job_progress(
-                job_id, message, current, total
+            progress_callback=lambda phase, message, current, total, activate: set_job_progress(
+                job_id, message, current, total, phase=phase, activate=activate
             ),
         )
         from .media_lifecycle import finalize_run_media
 
         current = hydrated_job(job_id) or {}
+        expected = int(current.get("expected_result_count") or len(rows))
         set_job(job_id, status="building_review", phase="building_review", message="Building compact review clips")
         cleanup = finalize_run_media(job_id, rows, bool(current.get("retain_sources", False)))
         set_job(job_id, status="finalizing", phase="finalizing", message="Finalizing outputs")
@@ -444,7 +688,8 @@ def run_existing_detection_job(job_id: str) -> None:
             phase="complete",
             message=f"Detection complete for {len(rows)} pitches",
             result_count=len(rows),
-            results=rows,
+            expected_result_count=expected,
+            results_complete=True,
             cleanup=cleanup,
         )
     except Exception as exc:
@@ -455,20 +700,28 @@ def run_job(job_id: str, start_url: str) -> None:
     try:
         from pipeline import run_game_detection
 
-        set_job(job_id, status="discovering_pitches", phase="discovering_pitches", message="Discovering TruMedia pitch videos")
+        begin_job_stage(
+            job_id,
+            "discovering_pitches",
+            "Discovering TruMedia pitch videos",
+        )
         rows = run_game_detection(
             run_id=job_id,
             start_url=start_url,
-            status_callback=lambda message, current, total: set_job_progress(
-                job_id, message, current, total
-            ),
             discovery_callback=lambda stats: set_job(
-                job_id, discovery=stats, pitch_scope="duke_catcher"
+                job_id,
+                discovery=stats,
+                expected_result_count=stats.get("downloadable_pitches", 0),
+                pitch_scope="duke_catcher",
+            ),
+            progress_callback=lambda phase, message, current, total, activate: set_job_progress(
+                job_id, message, current, total, phase=phase, activate=activate
             ),
         )
         from .media_lifecycle import finalize_run_media
 
         current = hydrated_job(job_id) or {}
+        expected = int(current.get("expected_result_count") or len(rows))
         set_job(job_id, status="building_review", phase="building_review", message="Building compact review clips")
         cleanup = finalize_run_media(job_id, rows, bool(current.get("retain_sources", False)))
         if cleanup.get("status") == "cleaned":
@@ -480,7 +733,8 @@ def run_job(job_id: str, start_url: str) -> None:
             phase="complete",
             message=f"Detection complete for {len(rows)} pitches",
             result_count=len(rows),
-            results=rows,
+            expected_result_count=expected,
+            results_complete=True,
             cleanup=cleanup,
         )
     except Exception as exc:

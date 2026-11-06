@@ -24,6 +24,15 @@ FIXTURE = """
 
 
 class DukeScheduleProviderTests(unittest.TestCase):
+    @staticmethod
+    def payload(season=2026):
+        return {
+            "team": "Duke",
+            "team_id": "duke",
+            "season": season,
+            "games": schedule.parse_duke_schedule_table(FIXTURE, season),
+        }
+
     def test_parser_normalizes_completed_games_and_doubleheaders(self):
         games = schedule.parse_duke_schedule_table(FIXTURE, 2026)
         self.assertEqual(5, len(games))
@@ -45,9 +54,44 @@ class DukeScheduleProviderTests(unittest.TestCase):
             schedule, "CACHE_DIR", Path(directory)
         ), patch.object(schedule.PROVIDERS["duke"], "fetch", side_effect=OSError("offline")):
             cache = Path(directory) / "duke_baseball_2026.json"
-            cache.write_text(json.dumps({"season": 2026, "games": []}), encoding="utf-8")
+            cache.write_text(json.dumps(self.payload()), encoding="utf-8")
             payload = schedule.load_schedule(refresh=True)
         self.assertTrue(payload["stale"])
+
+    def test_cross_team_schedule_is_rejected(self):
+        payload = {
+            "team": "Duke",
+            "team_id": "duke",
+            "season": 2026,
+            "games": [
+                {
+                    "id": f"duke-2026-02-{day:02d}-hawaii",
+                    "site": "home",
+                    "location": "Portland, OR",
+                    "conference": False,
+                }
+                for day in range(1, 22)
+            ],
+        }
+        with self.assertRaisesRegex(schedule.ScheduleIdentityError, "not a Duke home schedule"):
+            schedule.validate_duke_schedule_payload(payload, 2026)
+
+    def test_invalid_cache_is_removed_and_refetched(self):
+        bad_payload = {
+            "team": "Duke",
+            "season": 2026,
+            "games": [{"site": "home", "location": "Portland, OR"}],
+        }
+        valid_payload = self.payload()
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            schedule, "CACHE_DIR", Path(directory)
+        ), patch.object(schedule.PROVIDERS["duke"], "fetch", return_value=valid_payload) as fetch:
+            cache = Path(directory) / "duke_baseball_2026.json"
+            cache.write_text(json.dumps(bad_payload), encoding="utf-8")
+            payload = schedule.load_schedule()
+            self.assertEqual(valid_payload, payload)
+            self.assertEqual(valid_payload, json.loads(cache.read_text(encoding="utf-8")))
+            fetch.assert_called_once_with(2026)
 
     def test_season_validation_allows_next_season(self):
         self.assertEqual(2027, schedule.validate_season(2027))

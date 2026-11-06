@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from backend.app import create_app
 from project_paths import WEB_DIR
@@ -21,6 +22,16 @@ class WebContractTests(unittest.TestCase):
         script = (WEB_DIR / "app.js").read_text(encoding="utf-8")
         self.assertIn("visibilitychange", script)
         self.assertIn("schedulePoll", script)
+        self.assertIn("getRunSummaries", script)
+        self.assertIn("AbortController", script)
+        self.assertIn("3000", script)
+        self.assertIn("30000", script)
+        self.assertIn("patchRunNodes", script)
+        self.assertIn("patchResults", script)
+        self.assertIn("progress.percent == null", script)
+        self.assertIn("downloadCount", script)
+        self.assertIn("runCardAction", script)
+        self.assertIn("gameRunAction", script)
         self.assertIn("Export to GameTracker", script)
         self.assertIn("Connect TruMedia", script)
         self.assertIn("Revalidate current", script)
@@ -29,23 +40,26 @@ class WebContractTests(unittest.TestCase):
         self.assertNotIn("innerHTML", script)
 
     def test_static_and_run_routes_smoke(self):
-        client = create_app().test_client()
-        for path in (
-            "/",
-            "/styles.css",
-            "/app.js",
-            "/fonts/barlow-condensed-700.woff2",
-            "/api/schedule",
-            "/api/teams",
-            "/api/teams/duke/seasons",
-            "/api/teams/duke/schedule?season=2026",
-            "/api/integrations/trumedia/status",
-            "/api/runs",
-        ):
-            with self.subTest(path=path):
-                response = client.get(path)
-                self.assertEqual(200, response.status_code)
-                response.close()
+        schedule_payload = {"team": "Duke", "season": 2026, "games": []}
+        with patch("backend.routes.completed_schedule", return_value=schedule_payload):
+            client = create_app().test_client()
+            for path in (
+                "/",
+                "/styles.css",
+                "/app.js",
+                "/fonts/barlow-condensed-700.woff2",
+                "/api/schedule",
+                "/api/teams",
+                "/api/teams/duke/seasons",
+                "/api/teams/duke/schedule?season=2026",
+                "/api/integrations/trumedia/status",
+                "/api/runs",
+                "/api/runs?view=summary",
+            ):
+                with self.subTest(path=path):
+                    response = client.get(path)
+                    self.assertEqual(200, response.status_code)
+                    response.close()
 
 
 if __name__ == "__main__":

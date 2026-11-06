@@ -9,8 +9,14 @@ from typing import Iterable
 
 from tqdm import tqdm
 
-from backend.storage import atomic_write_text, run_lock
-from .analyzer import PitchStanceConfig, analyze_pitch_clip
+from backend.storage import (
+    atomic_write_json,
+    atomic_write_text,
+    pitch_state_dir,
+    pitch_state_file,
+    run_lock,
+)
+from .analyzer import PitchStanceAnalyzer, PitchStanceConfig
 from .config import StatusCallback
 from .schemas import PitchDetection, PitchFeature
 
@@ -39,90 +45,127 @@ def detect_stances_for_manifest(
     feature_rows: list[PitchFeature] = []
     video_rows = downloaded_video_rows(manifest_path)
     total = len(video_rows)
-    pipeline_config = PitchStanceConfig()
+    analyzer = PitchStanceAnalyzer(PitchStanceConfig())
 
     if status_callback is not None:
         status_callback("Running catcher detection and stance classifier", 0, total)
 
     progress = tqdm(video_rows, desc="Catcher detection", unit="pitch", total=total)
     for idx, row in enumerate(progress, start=1):
-        clip_id = row.get("clip_id") or Path(row.get("saved_path", "")).stem
-        video_path = row.get("saved_path", "")
-        try:
-            result = analyze_pitch_clip(video_path, config=pipeline_config)
-            status = "ok" if result.accepted else result.rejection_reason or "rejected"
-            fps = float((result.diagnostics or {}).get("fps") or 0)
-            impact_seconds = (
-                result.impact_frame / fps
-                if result.impact_frame is not None and fps
-                else ""
-            )
-            window_start_seconds = (
-                result.window_start_frame / fps
-                if result.window_start_frame is not None and fps
-                else ""
-            )
-            window_end_seconds = (
-                result.window_end_frame / fps
-                if result.window_end_frame is not None and fps
-                else ""
-            )
-            features = (
-                result.feature_vector.tolist()
-                if result.feature_vector is not None
-                else ""
-            )
-            feature_rows.append(PitchFeature("", clip_id, features, status))
-            detections.append(
-                PitchDetection(
-                    pitch_index=idx,
-                    clip_id=clip_id,
-                    video_path=video_path,
-                    stance=result.label or "",
-                    confidence=result.confidence,
-                    status=status,
-                    impact_frame=result.impact_frame if result.impact_frame is not None else "",
-                    window_start_frame=(
-                        result.window_start_frame
-                        if result.window_start_frame is not None
-                        else ""
-                    ),
-                    window_end_frame=(
-                        result.window_end_frame
-                        if result.window_end_frame is not None
-                        else ""
-                    ),
-                    valid_frame_count=result.valid_frame_count,
-                    vote_distribution=json.dumps(result.vote_distribution, sort_keys=True),
-                    detector_provenance=",".join(result.detector_provenance),
-                    quality_flags=",".join(result.quality_flags),
-                    accepted=result.accepted,
-                    rejection_reason=result.rejection_reason or "",
-                    camera_quality=result.camera_quality,
-                    fps=fps or "",
-                    impact_seconds=impact_seconds,
-                    window_start_seconds=window_start_seconds,
-                    window_end_seconds=window_end_seconds,
-                )
-            )
-        except Exception as exc:
-            feature_rows.append(PitchFeature("", clip_id, "", f"error:{type(exc).__name__}"))
-            detections.append(
-                PitchDetection(
-                    idx,
-                    clip_id,
-                    video_path,
-                    "",
-                    0.0,
-                    f"error:{type(exc).__name__}",
-                    str(exc),
-                )
-            )
+        detection, feature = detect_stance_for_row(row, idx, analyzer)
+        detections.append(detection)
+        feature_rows.append(feature)
 
         if status_callback is not None:
             status_callback(f"Processed {idx} of {total} pitches", idx, total)
 
     return detections, feature_rows
+
+
+def detect_stance_for_row(
+    row: dict,
+    pitch_index: int,
+    analyzer: PitchStanceAnalyzer,
+) -> tuple[PitchDetection, PitchFeature]:
+    clip_id = row.get("clip_id") or Path(row.get("saved_path", "")).stem
+    video_path = row.get("saved_path", "")
+    try:
+        result = analyzer.analyze(video_path)
+        status = "ok" if result.accepted else result.rejection_reason or "rejected"
+        fps = float((result.diagnostics or {}).get("fps") or 0)
+        impact_seconds = (
+            result.impact_frame / fps
+            if result.impact_frame is not None and fps
+            else ""
+        )
+        window_start_seconds = (
+            result.window_start_frame / fps
+            if result.window_start_frame is not None and fps
+            else ""
+        )
+        window_end_seconds = (
+            result.window_end_frame / fps
+            if result.window_end_frame is not None and fps
+            else ""
+        )
+        features = (
+            result.feature_vector.tolist()
+            if result.feature_vector is not None
+            else ""
+        )
+        feature = PitchFeature("", clip_id, features, status)
+        detection = PitchDetection(
+            pitch_index=pitch_index,
+            clip_id=clip_id,
+            video_path=video_path,
+            stance=result.label or "",
+            confidence=result.confidence,
+            status=status,
+            impact_frame=result.impact_frame if result.impact_frame is not None else "",
+            window_start_frame=(
+                result.window_start_frame
+                if result.window_start_frame is not None
+                else ""
+            ),
+            window_end_frame=(
+                result.window_end_frame
+                if result.window_end_frame is not None
+                else ""
+            ),
+            valid_frame_count=result.valid_frame_count,
+            vote_distribution=json.dumps(result.vote_distribution, sort_keys=True),
+            detector_provenance=",".join(result.detector_provenance),
+            quality_flags=",".join(result.quality_flags),
+            accepted=result.accepted,
+            rejection_reason=result.rejection_reason or "",
+            camera_quality=result.camera_quality,
+            fps=fps or "",
+            impact_seconds=impact_seconds,
+            window_start_seconds=window_start_seconds,
+            window_end_seconds=window_end_seconds,
+        )
+    except Exception as exc:
+        feature = PitchFeature("", clip_id, "", f"error:{type(exc).__name__}")
+        detection = PitchDetection(
+            pitch_index,
+            clip_id,
+            video_path,
+            "",
+            0.0,
+            f"error:{type(exc).__name__}",
+            str(exc),
+        )
+    return detection, feature
+
+
+def persist_pitch_state(
+    run_id: str,
+    detection: PitchDetection,
+    feature: PitchFeature,
+) -> None:
+    path = pitch_state_file(run_id, detection.clip_id, create_parent=True)
+    with run_lock(run_id):
+        atomic_write_json(
+            path,
+            {"detection": asdict(detection), "feature": asdict(feature)},
+        )
+
+
+def load_pitch_states(run_id: str) -> tuple[list[PitchDetection], list[PitchFeature]]:
+    directory = pitch_state_dir(run_id)
+    if not directory.is_dir():
+        return [], []
+    records = []
+    for path in directory.glob("*.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            detection = PitchDetection(**payload["detection"])
+            feature = PitchFeature(**payload["feature"])
+            records.append((detection, feature))
+        except (OSError, json.JSONDecodeError, KeyError, TypeError):
+            continue
+    records.sort(key=lambda item: item[0].pitch_index)
+    return [item[0] for item in records], [item[1] for item in records]
 
 
 def write_detection_outputs(

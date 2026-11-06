@@ -24,8 +24,23 @@ export async function request(path, options = {}) {
 export const getSchedule = (season = 2026) => request(`/api/schedule?season=${encodeURIComponent(season)}`);
 export const getSeasons = () => request("/api/teams/duke/seasons");
 export const getRuns = () => request("/api/runs");
+export async function getRunSummaries(etag = null, signal = undefined) {
+  const response = await fetch(apiUrl("/api/runs?view=summary"), {
+    headers: etag ? { "If-None-Match": etag } : {},
+    signal,
+  });
+  if (response.status === 304) return { notModified: true, etag };
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.error || `Request failed (${response.status})`);
+    error.status = response.status;
+    Object.assign(error, payload);
+    throw error;
+  }
+  return { payload, etag: response.headers.get("ETag") };
+}
 export const getTruMediaStatus = () => request("/api/integrations/trumedia/status");
-export const getRun = (runId) => request(`/api/runs/${encodeURIComponent(runId)}`);
+export const getRun = (runId, options = {}) => request(`/api/runs/${encodeURIComponent(runId)}`, options);
 export const startRun = (payload) =>
   request("/api/run", { method: "POST", body: JSON.stringify(payload) });
 export const reprocessRun = (gameId, payload) =>

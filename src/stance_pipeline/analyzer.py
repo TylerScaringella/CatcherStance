@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import os
+import threading
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -27,13 +28,15 @@ from .model import StanceClassifier
 from .schemas import EventAnchor, FrameBox, PitchStanceResult, PoseObservation
 from .temporal import StableWindow, choose_stable_window, contiguous_groups
 
-_MODEL_CACHE: dict[str, YOLO] = {}
+_MODEL_CACHE: dict[tuple[str, int], YOLO] = {}
 
 
 def _load_model(path: Path) -> YOLO:
-    key = str(path.resolve())
+    # Each inference worker owns its Ultralytics model instances. Workers may run
+    # concurrently on non-MPS deployments, and Ultralytics prediction state is mutable.
+    key = (str(path.resolve()), threading.get_ident())
     if key not in _MODEL_CACHE:
-        _MODEL_CACHE[key] = YOLO(key)
+        _MODEL_CACHE[key] = YOLO(key[0])
     return _MODEL_CACHE[key]
 
 
@@ -59,10 +62,12 @@ def _sampled_frames(
     capture.set(cv2.CAP_PROP_POS_FRAMES, max(0, start_frame))
     frame_index = max(0, start_frame)
     while frame_index <= end_frame:
-        ok, frame = capture.read()
-        if not ok:
+        if not capture.grab():
             break
         if (frame_index - start_frame) % stride == 0:
+            ok, frame = capture.retrieve()
+            if not ok:
+                break
             yield frame_index, frame
         frame_index += 1
     capture.release()
@@ -84,7 +89,7 @@ def _predict_kwargs(device: str | None, image_size: int, confidence: float) -> d
     return kwargs
 
 
-@dataclass
+@dataclass(frozen=True)
 class PitchStanceConfig:
     pose_model_path: Path = POSE_MODEL_PATH
     phc_model_path: Path | None = field(default_factory=lambda: resolve_model_asset("baseballcv_phc"))
@@ -684,12 +689,14 @@ def analyze_pitch_clip(
         # MPS can occasionally exceed Ultralytics' batched NMS time budget on a
         # cold model. Retry with smaller batches only when no trajectory survives.
         if anchor is None and config.batch_size > config.retry_batch_size:
-            original_batch_size = config.batch_size
-            try:
-                config.batch_size = config.retry_batch_size
+            if isinstance(anchor_detector, YOLOBallEventAnchor) and config.event_model_path is not None:
+                retry_detector = YOLOBallEventAnchor(
+                    config.event_model_path,
+                    replace(config, batch_size=config.retry_batch_size),
+                )
+                anchor = retry_detector.detect(path, search_start, search_end)
+            else:
                 anchor = anchor_detector.detect(path, search_start, search_end)
-            finally:
-                config.batch_size = original_batch_size
         if anchor:
             provenance.append(anchor.source)
         else:
@@ -744,17 +751,24 @@ def analyze_pitch_clip(
 
     window = select_window(observations)
     if window is None and config.batch_size > config.retry_batch_size:
-        original_batch_size = config.batch_size
-        try:
-            config.batch_size = config.retry_batch_size
+        if isinstance(pose_extractor, YOLOCatcherPoseExtractor):
+            retry_extractor = YOLOCatcherPoseExtractor(
+                config.pose_model_path,
+                replace(config, batch_size=config.retry_batch_size),
+            )
+            observations = retry_extractor.extract(
+                path,
+                pose_start,
+                pose_end,
+                proposals,
+            )
+        else:
             observations = pose_extractor.extract(
                 path,
                 pose_start,
                 pose_end,
                 proposals,
             )
-        finally:
-            config.batch_size = original_batch_size
         window = select_window(observations)
         flags.append("reduced_batch_pose_retry")
 
@@ -876,3 +890,36 @@ def analyze_pitch_clip(
             "event_trajectory_length": anchor.trajectory_length if anchor else 0,
         },
     )
+
+
+class PitchStanceAnalyzer:
+    """Reusable single-worker analyzer with model-backed components initialized once."""
+
+    def __init__(self, config: PitchStanceConfig | None = None):
+        base = config or PitchStanceConfig()
+        scene_detector = base.scene_detector or HistogramSceneDetector(
+            stride=base.scene_stride,
+            threshold=base.scene_cut_threshold,
+        )
+        catcher_proposer = base.catcher_proposer
+        if catcher_proposer is None and base.phc_model_path is not None:
+            catcher_proposer = YOLOCatcherProposer(base.phc_model_path, base)
+        event_anchor_detector = base.event_anchor_detector
+        if event_anchor_detector is None and base.event_model_path is not None:
+            event_anchor_detector = YOLOBallEventAnchor(base.event_model_path, base)
+        pose_extractor = base.pose_extractor or YOLOCatcherPoseExtractor(
+            base.pose_model_path,
+            base,
+        )
+        stance_classifier = base.stance_classifier or RollingMLPClassifier()
+        self.config = replace(
+            base,
+            scene_detector=scene_detector,
+            catcher_proposer=catcher_proposer,
+            event_anchor_detector=event_anchor_detector,
+            pose_extractor=pose_extractor,
+            stance_classifier=stance_classifier,
+        )
+
+    def analyze(self, video_path: str | Path) -> PitchStanceResult:
+        return analyze_pitch_clip(video_path, config=self.config)

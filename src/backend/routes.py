@@ -24,6 +24,7 @@ from .jobs import (
     hydrated_job,
     latest_job_for_game,
     list_runs,
+    list_run_summaries,
     run_existing_detection_job,
     run_job,
     write_job_state,
@@ -55,6 +56,10 @@ def _public_candidate(candidate: dict) -> dict:
             "site", "result", "status", "trackman_available",
         )
     }
+
+
+def _persistable_job(job: dict) -> dict:
+    return {key: value for key, value in job.items() if key != "results"}
 
 
 def _admin_authorized() -> bool:
@@ -209,6 +214,20 @@ def register_routes(app):
 
     @app.get("/api/runs")
     def runs():
+        if request.args.get("view") == "summary":
+            summaries = list_run_summaries()
+            signature = hashlib.sha256(
+                json.dumps(
+                    [(item["id"], item.get("updated_at"), item.get("status")) for item in summaries],
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            if request.if_none_match.contains(signature):
+                return Response(status=304)
+            response = jsonify({"runs": summaries, "updated_at": time.time()})
+            response.set_etag(signature)
+            response.headers["Cache-Control"] = "no-cache"
+            return response
         return jsonify({"runs": list_runs(), "updated_at": time.time()})
 
     @app.get("/api/runs/<run_id>")
@@ -248,6 +267,9 @@ def register_routes(app):
             return _error("invalid run id", 400)
         if location is None:
             return _error("run not found", 404)
+        job = hydrated_job(run_id)
+        if job is None or not job.get("results_complete"):
+            return _error("results are not finalized", 409, "results_incomplete")
         file_path = run_file(location, f"detections.{fmt}")
         if not file_path.is_file():
             return _error("results not found", 404)
@@ -331,16 +353,18 @@ def register_routes(app):
     @app.post("/api/run")
     def run_detection(payload_override=None, reprocess: bool = False):
         payload = payload_override if payload_override is not None else (request.get_json(silent=True) or {})
-        game = find_game(payload.get("game_id", ""))
+        requested_game_id = str(payload.get("game_id") or "")
+        force_redownload = bool(payload.get("force_redownload")) or reprocess
+        latest_job = None if force_redownload else latest_job_for_game(requested_game_id)
+        if latest_job and latest_job.get("status") == "complete":
+            return jsonify(latest_job), 200
+
+        game = find_game(requested_game_id)
         if game is None:
             return _error("unknown game_id", 400)
 
-        force_redownload = bool(payload.get("force_redownload")) or reprocess
-        latest_job = None if force_redownload else latest_job_for_game(game["id"])
         if latest_job and latest_job.get("read_only") and latest_job.get("status") != "complete":
             return _error("example runs are read-only", 409)
-        if latest_job and latest_job.get("status") == "complete":
-            return jsonify(latest_job), 200
         if latest_job and latest_job.get("status") in ACTIVE_STATUSES:
             return jsonify(latest_job), 200
 
@@ -360,7 +384,7 @@ def register_routes(app):
         if latest_job and latest_job.get("status") == "ready":
             run_id = latest_job["id"]
             queued = {
-                **latest_job,
+                **_persistable_job(latest_job),
                 "status": "queued",
                 "phase": "queued",
                 "message": "Queued stance detection",
@@ -379,7 +403,7 @@ def register_routes(app):
         if latest_job and latest_job.get("manifest", {}).get("total", 0) > 0:
             run_id = latest_job["id"]
             queued = {
-                **latest_job,
+                **_persistable_job(latest_job),
                 "status": "queued",
                 "phase": "queued",
                 "message": "Queued download resume",
@@ -412,7 +436,6 @@ def register_routes(app):
             "pitch_scope": "duke_catcher",
             "trumedia_match": _public_candidate(match.match),
             "result_count": 0,
-            "results": [],
             "created_at": time.time(),
             "updated_at": time.time(),
         }

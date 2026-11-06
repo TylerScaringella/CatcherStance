@@ -235,6 +235,7 @@ input, select {
 .game-line { margin-top: 12px; color: #c5d8eb; font-size: 17px; }
 .game-hero .button { position: relative; z-index: 1; color: var(--navy-950); background: #f8fbff; border-color: #f8fbff; }
 .hero-actions { position: relative; z-index: 1; display: grid; gap: 8px; }
+.game-hero .hero-actions .muted { color: #c5d8eb; font-size: 12px; text-align: center; }
 .game-hero .hero-secondary { color: white; background: transparent; border-color: rgba(255,255,255,.5); }
 .score-strip { display: flex; align-items: center; gap: 10px 26px; padding: 18px 28px; border-bottom: 1px solid var(--line); font-weight: 650; }
 .score-strip span:nth-child(2) { color: var(--muted); }
@@ -257,6 +258,15 @@ input, select {
 .progress-track { height: 8px; overflow: hidden; background: #dfe5ec; border-radius: 99px; }
 .progress-track span { display: block; height: 100%; background: linear-gradient(90deg, var(--duke), #39a2ef); border-radius: inherit; transition: width .25s ease; }
 .progress-track.indeterminate span { width: 35%; animation: indeterminate 1.3s infinite ease-in-out; }
+.stage-strip { display: flex; flex-wrap: wrap; gap: 6px; }
+.stage-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; color: var(--muted); background: #f1f3f5; border-radius: 999px; font-size: 10px; font-weight: 700; }
+.stage-chip i { width: 6px; height: 6px; border-radius: 50%; background: #aab3bf; }
+.stage-chip strong { color: inherit; font-size: inherit; }
+.stage-chip.started, .stage-chip.active { color: #004b87; background: #dceeff; }
+.stage-chip.started i, .stage-chip.active i { background: var(--duke); }
+.stage-chip.complete { color: var(--green); background: var(--green-soft); }
+.stage-chip.complete i { background: var(--green); }
+.progress-facts { color: var(--muted); font-size: 11px; }
 .runs-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; }
 .run-card { display: flex; min-height: 300px; flex-direction: column; gap: 19px; padding: 22px; }
 .run-card.active-run { border-color: #88bfe9; box-shadow: 0 0 0 3px rgba(0,83,155,.07), var(--shadow); }
