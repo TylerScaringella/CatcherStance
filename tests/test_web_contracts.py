@@ -37,7 +37,21 @@ class WebContractTests(unittest.TestCase):
         self.assertIn("Revalidate current", script)
         self.assertIn("python src/trumedia_auth.py", script)
         self.assertIn("retain_sources", script)
+        self.assertIn("function stanceLabel", script)
+        self.assertIn("game-context-strip", script)
+        self.assertIn("resultAttention", script)
+        self.assertIn("Knee-down Left", script)
+        self.assertIn("Review action", script)
         self.assertNotIn("innerHTML", script)
+
+    def test_baseball_operations_visual_contract(self):
+        index = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+        styles = (WEB_DIR / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("ops-ui-1", index)
+        self.assertIn("game-context-strip", styles)
+        self.assertIn("run-relationship", styles)
+        self.assertIn("needs-attention", styles)
+        self.assertIn("prefers-reduced-motion", styles)
 
     def test_static_and_run_routes_smoke(self):
         schedule_payload = {"team": "Duke", "season": 2026, "games": []}
