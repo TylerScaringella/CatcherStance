@@ -101,6 +101,9 @@ class PitchStanceConfig:
     scene_cut_threshold: float = 0.25
     phc_stride_seconds: float = 0.5
     event_stride: int = 5
+    trajectory_smoothing_window: int = 3
+    plate_arrival_radius_norm: float = 0.18
+    min_event_margin_seconds: float = 0.12
     pose_stride: int = 2
     pre_impact_start_seconds: float = 1.75
     pre_impact_end_seconds: float = 0.45
@@ -278,14 +281,59 @@ class YOLOBallEventAnchor:
             return len(group) + min(path_length, 2.0) - endpoint_penalty
 
         trajectory = max(trajectories, key=trajectory_score)
+        centers = np.asarray([row[2] for row in trajectory], dtype=float)
+        smoothing_window = max(1, int(self.config.trajectory_smoothing_window))
+        if smoothing_window > 1 and len(centers) >= smoothing_window:
+            smoothed = centers.copy()
+            radius = smoothing_window // 2
+            for index in range(len(centers)):
+                start = max(0, index - radius)
+                end = min(len(centers), index + radius + 1)
+                smoothed[index] = np.median(centers[start:end], axis=0)
+        else:
+            smoothed = centers
+
+        event_index, event_type = select_plate_arrival_frame(
+            [row[0] for row in trajectory],
+            smoothed,
+            plate_center,
+            self.config.plate_arrival_radius_norm,
+        )
+        arrival_distance = None
+        if event_type == "plate_arrival" and plate_center is not None:
+            arrival_distance = float(np.linalg.norm(smoothed[event_index] - plate_center))
+
+        event_row = trajectory[event_index]
         confidence = float(np.mean([row[1] for row in trajectory]))
+        if arrival_distance is not None:
+            confidence *= max(0.0, 1.0 - 0.25 * arrival_distance / self.config.plate_arrival_radius_norm)
         return EventAnchor(
-            frame_index=trajectory[-1][0],
+            frame_index=event_row[0],
             confidence=confidence,
             source="baseballcv_ball_trajectory",
             trajectory_start_frame=trajectory[0][0],
             trajectory_length=len(trajectory),
+            uncertainty_frames=max(self.config.event_stride, int(round(self.config.event_stride * 1.5))),
+            event_type=event_type,
         )
+
+
+def select_plate_arrival_frame(
+    frame_indices: Sequence[int],
+    centers: np.ndarray,
+    plate_center: np.ndarray | None,
+    radius: float,
+) -> tuple[int, str]:
+    """Choose a smoothed trajectory endpoint or the closest credible plate arrival."""
+    if not len(frame_indices):
+        raise ValueError("An event trajectory must contain at least one frame")
+    if plate_center is None:
+        return len(frame_indices) - 1, "trajectory_endpoint"
+    distances = np.linalg.norm(centers - plate_center, axis=1)
+    closest_index = int(np.argmin(distances))
+    if float(distances[closest_index]) <= radius:
+        return closest_index, "plate_arrival"
+    return len(frame_indices) - 1, "trajectory_endpoint"
 
 
 class YOLOCatcherPoseExtractor:
@@ -534,6 +582,8 @@ class RollingMLPClassifier:
         max_gap_frames: int,
     ) -> tuple[str | None, float, dict[str, float], np.ndarray | None, int]:
         predictions = []
+        feature_rows = []
+        sequence_rows = []
         for end_index in range(6, len(observations)):
             sequence = observations[end_index - 6 : end_index + 1]
             gaps = [
@@ -547,7 +597,17 @@ class RollingMLPClassifier:
             features = np.concatenate(
                 [normalize_keypoints(item.keypoints).reshape(-1) for item in sequence]
             )
-            raw_label, model_confidence = self.classifier.predict(features)
+            feature_rows.append(features)
+            sequence_rows.append((sequence, features))
+
+        if feature_rows:
+            if hasattr(self.classifier, "predict_batch"):
+                model_predictions = self.classifier.predict_batch(np.asarray(feature_rows))
+            else:
+                model_predictions = [self.classifier.predict(features) for features in feature_rows]
+        else:
+            model_predictions = []
+        for (sequence, features), (raw_label, model_confidence) in zip(sequence_rows, model_predictions):
             label = self.label_mapping.get(raw_label, raw_label)
             pose_quality = float(np.mean([item.quality for item in sequence]))
             weight = max(1e-6, model_confidence * pose_quality)
@@ -811,7 +871,8 @@ def analyze_pitch_clip(
                 "camera_cuts": cuts,
             },
         )
-    if anchor is not None and window.end_frame >= anchor.frame_index:
+    minimum_event_margin = max(1, int(round(config.min_event_margin_seconds * fps)))
+    if anchor is not None and window.end_frame >= anchor.frame_index - minimum_event_margin:
         return _rejected_result(
             "window_crosses_impact",
             provenance,
@@ -888,6 +949,8 @@ def analyze_pitch_clip(
             "window_coverage": coverage,
             "event_confidence": anchor.confidence if anchor else None,
             "event_trajectory_length": anchor.trajectory_length if anchor else 0,
+            "event_type": anchor.event_type if anchor else "motion_fallback",
+            "event_uncertainty_frames": anchor.uncertainty_frames if anchor else 0,
         },
     )
 

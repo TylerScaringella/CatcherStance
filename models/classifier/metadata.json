@@ -1,5 +1,5 @@
 {
-  "artifact_version": 1,
+  "artifact_version": 2,
   "feature_schema": "coco17_xy_torso_normalized_7_frames",
   "feature_count": 238,
   "sequence_frames": 7,
@@ -12,7 +12,24 @@
     "left_right": "catcher_anatomical_side"
   },
   "training_runtime": {
-    "scikit_learn": "1.6.1"
+    "scikit_learn": "1.6.1",
+    "audit_runtime_scikit_learn": "1.8.0"
+  },
+  "dataset": {
+    "canonical_path": "data/processed/dataset/keypoints-labeled.csv",
+    "usable_rows": 2489,
+    "source_groups": 488,
+    "class_counts": {
+      "Knee-down Left": 289,
+      "Knee-down Right": 2196,
+      "Squat": 4
+    }
+  },
+  "evaluation": {
+    "split_strategy": "GroupShuffleSplit, 20 splits, 20% test, source video prefix grouping",
+    "promotion_status": "not_promoted",
+    "event_anchor_policy": "smoothed plate arrival preferred; trajectory endpoint or motion fallback explicitly flagged",
+    "annotation_manifest": "research/annotations/pitch_event_annotation_manifest.csv"
   },
   "known_limitations": [
     "Class imbalance favors Knee-down Right.",
