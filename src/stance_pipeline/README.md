@@ -70,7 +70,6 @@ evidence. To reproduce the current-pipeline baseline and generate a review manif
 PYTHONPATH=src ./.venv/bin/python research/scripts/audit_abstentions.py
 ```
 
-The audit keeps legacy frame-level research summaries separate from pitch-level
-results and includes unmatched local clips with an explicit empty label join. Do not
-relax a rejection gate solely to increase coverage; review identity continuity and
-pre-event timing evidence first.
+The audit includes unmatched local clips with an explicit empty label join and writes
+generated reports locally. Do not relax a rejection gate solely to increase coverage;
+review identity continuity and pre-event timing evidence first.

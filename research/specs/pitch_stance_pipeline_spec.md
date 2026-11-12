@@ -125,12 +125,12 @@ The replay is review evidence, not a production threshold change. A vote relaxat
 is blocked unless event timing, temporal coverage, and catcher identity continuity
 are all present.
 
-The audit writes the tracked aggregate to
-`research/outputs/abstention_audit_summary.json` and generated per-clip diagnostics
+The audit writes the local aggregate to
+`research/outputs/generated/abstention_audit_summary.json` and generated per-clip diagnostics
 under `research/outputs/generated/`. Local clips that do not match the exported raw
 label CSV are still audited and are explicitly counted as unlabeled; they must not be
-silently dropped. The historical frame-level summary is reported separately and must
-not be used as the current staged-analyzer abstention rate.
+silently dropped. Historical research measurements must not be presented as the
+current staged-analyzer abstention rate.
 
 Recovery changes are eligible for promotion only when they improve valid-pitch
 coverage on a reviewed holdout without increasing catcher identity swaps, post-event
