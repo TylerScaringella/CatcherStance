@@ -122,7 +122,7 @@ Important local output files:
 - `downloads/`: downloaded pitch-by-pitch video clips
 - `artifacts/`: durable generated diagnostics and reusable run-specific assets
 
-The default storage policy creates `artifacts/review-<clip-id>.mp4`, validates every review, and then removes full source downloads. Enable **Retain full source clips** before starting to preserve them. Cleanup failure never deletes source clips.
+The web workflow creates `artifacts/review-<clip-id>.mp4`, validates every review, and retains full source downloads through analyst review by default. After every pitch has a final stance, an authorized analyst can explicitly purge the source downloads; compact reviews, diagnostics, overrides, and exports remain. Cleanup failure never deletes source clips.
 
 CSV and JSON exports remain unavailable until final aggregation completes. Partial
 results are read from the internal per-pitch state through the run-detail API; they

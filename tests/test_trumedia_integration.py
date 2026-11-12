@@ -208,7 +208,7 @@ class TruMediaAdminApiTests(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertNotIn("url", response.get_json()["candidates"][0])
 
-    def test_run_uses_server_match_and_defaults_to_source_cleanup(self):
+    def test_run_uses_server_match_and_defaults_to_retaining_sources(self):
         match = {
             "id": "candidate-1", "date": "2026-02-13", "opponent": "Maine",
             "opponent_key": "maine", "url": "https://duke-ncaabaseball.trumedianetworks.com/baseball/game/1",
@@ -223,7 +223,7 @@ class TruMediaAdminApiTests(unittest.TestCase):
         self.assertEqual(202, response.status_code)
         payload = response.get_json()
         self.assertEqual(1, payload["revision"])
-        self.assertFalse(payload["retain_sources"])
+        self.assertTrue(payload["retain_sources"])
         self.assertEqual(3, payload["pitch_limit"])
         self.assertNotIn("url", payload["trumedia_match"])
 
