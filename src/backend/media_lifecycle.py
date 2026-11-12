@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from downloader.files import validate_mp4
@@ -70,14 +71,57 @@ def _encode_review_opencv(source: Path, destination: Path, start: float, duratio
         capture.release()
 
 
+def _video_duration(source: Path) -> float | None:
+    try:
+        import cv2
+
+        capture = cv2.VideoCapture(str(source))
+        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
+        frames = float(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        capture.release()
+        return frames / fps if fps > 0 and frames > 0 else None
+    except Exception:
+        return None
+
+
 def _review_bounds(result: dict) -> tuple[float, float]:
-    start = max(0.0, float(result.get("window_start_seconds") or 0) - 0.35)
-    end_candidates = [
-        float(result.get("window_end_seconds") or start + 1.5) + 0.5,
-        float(result.get("impact_seconds") or 0) + 0.6,
-    ]
-    end = max(end_candidates)
-    return start, max(1.0, min(4.0, end - start))
+    impact = float(result.get("impact_seconds") or 0)
+    set_start = float(result.get("window_start_seconds") or max(0.0, impact - 3.0))
+    start = max(0.0, min(set_start - 1.0, impact - 4.0))
+    end = max(
+        float(result.get("window_end_seconds") or set_start) + 0.6,
+        impact + 0.8,
+    )
+    return start, max(1.0, min(6.0, end - start))
+
+
+def purge_source_clips(run_id: str) -> dict:
+    location = resolve_run(run_id)
+    if location is None or location.read_only:
+        raise ValueError("source purge requires a writable live run")
+    manifest_path = location.path / "video_manifest.csv"
+    rows, _, _ = load_manifest(str(manifest_path))
+    purged = 0
+    with run_lock(run_id):
+        for row in rows:
+            if row.get("status") == "skipped" or row.get("skip_reason"):
+                continue
+            try:
+                source = resolve_manifest_media(location, str(row.get("saved_path") or ""))
+            except ValueError:
+                source = None
+            if source is not None and source.is_file():
+                source.unlink()
+                purged += 1
+            row["status"] = "cleaned"
+            row["error"] = ""
+        write_manifest(str(manifest_path), rows)
+    return {
+        "status": "purged",
+        "purged_count": purged,
+        "purged_at": time.time(),
+        **storage_usage(run_id),
+    }
 
 
 def storage_usage(run_id: str) -> dict[str, int]:
@@ -111,6 +155,10 @@ def build_review_for_result(run_id: str, result: dict) -> Path:
     if not source.is_file():
         raise RuntimeError("source clip is missing")
     start, duration = _review_bounds(result)
+    source_duration = _video_duration(source)
+    if source_duration is not None:
+        start = min(start, max(0.0, source_duration - 1.0))
+        duration = min(duration, max(1.0, source_duration - start))
     with job_temp_dir(run_id) as temporary_dir:
         temporary = temporary_dir / destination.name
         _encode_review(source, temporary, start, duration)

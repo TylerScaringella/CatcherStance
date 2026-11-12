@@ -9,6 +9,7 @@ import {
   getScheduleSettings,
   getSeasons,
   getTruMediaStatus,
+  purgeSourceClips,
   refreshSchedule,
   recoverPitchSource,
   savePitchReview,
@@ -98,7 +99,7 @@ function reviewStance(value) {
 }
 
 function resultAttention(row) {
-  return Boolean(row.quality_flags?.length || !row.accepted);
+  return Boolean(row.attention_required);
 }
 
 function route() {
@@ -805,15 +806,15 @@ function renderGames() {
       element("summary", { text: "Run settings" }),
       element("div", { className: "settings-grid" }, [
         element("label", { className: "check-row" }, [
-          element("input", { id: "retainSources", type: "checkbox" }),
-          element("span", { text: "Retain full source clips after compact reviews are created" }),
+          element("input", { id: "retainSources", type: "checkbox", checked: true }),
+          element("span", { text: "Keep full source clips available through review" }),
         ]),
         element("label", { className: "field" }, [
           element("span", { text: "Test run pitch limit" }),
           element("input", { id: "pitchLimit", type: "number", min: 1, max: 25, step: 1, placeholder: "Full game", "aria-describedby": "pitchLimitHelp" }),
         ]),
         element("p", { id: "pitchLimitHelp", className: "muted", text: "Optional. Enter 1–25 to run the real download, classification, review, and export flow on only a few pitches. Leave blank for the full game." }),
-        element("p", { className: "muted", text: "By default, full downloads are removed only after results and review clips validate." }),
+        element("p", { className: "muted", text: "Source clips remain available until every pitch is reviewed and you explicitly purge them." }),
       ]),
     ]);
     if (!run?.read_only) detail.append(advanced);
@@ -844,7 +845,7 @@ function renderGames() {
 
 async function submitRun(game, container, reprocess = false) {
   const button = container.querySelector(reprocess ? ".hero-secondary" : ".button.primary");
-  const retainSources = container.querySelector("#retainSources")?.checked || false;
+  const retainSources = container.querySelector("#retainSources")?.checked !== false;
   const pitchLimitInput = container.querySelector("#pitchLimit");
   const pitchLimit = pitchLimitInput?.value ? Number(pitchLimitInput.value) : null;
   button.disabled = true;
@@ -941,8 +942,9 @@ function renderRuns() {
 
 function resultSummary(rows) {
   const accepted = rows.filter((row) => row.accepted);
-  const count = (label) => rows.filter((row) => stanceKey(row.stance) === label).length;
+  const count = (label) => rows.filter((row) => stanceKey(row.final_stance || row.stance) === label).length;
   const flagged = rows.filter(resultAttention).length;
+  const reviewed = rows.filter((row) => row.review_status === "reviewed").length;
   const average = accepted.length
     ? accepted.reduce((sum, row) => sum + Number(row.confidence || 0), 0) / accepted.length
     : 0;
@@ -951,7 +953,8 @@ function resultSummary(rows) {
     ["Knee-down Left", count("LKD"), "LKD model label"],
     ["Knee-down Right", count("RKD"), "RKD model label"],
     ["Squat", count("Squat"), "traditional"],
-    ["Needs attention", flagged, "flags or abstentions"],
+    ["Needs attention", flagged, "review blockers"],
+    ["Reviewed", reviewed, "final stances saved"],
     ["Avg. confidence", formatPercent(average), "accepted pitches"],
   ];
 }
@@ -976,7 +979,7 @@ function filteredResultRows(run) {
       (state.stanceFilter === "abstained" ? !row.accepted : stanceKey(row.stance) === state.stanceFilter);
     const qualityMatch = state.qualityFilter === "all" ||
       (state.qualityFilter === "flagged" && resultAttention(row)) ||
-      (state.qualityFilter === "clear" && row.accepted && !row.quality_flags?.length);
+    (state.qualityFilter === "clear" && !resultAttention(row));
     return textMatch && stanceMatch && qualityMatch;
   });
 }
@@ -984,7 +987,7 @@ function filteredResultRows(run) {
 function resultRow(row, run) {
   const effectiveStance = row.review_status === "reviewed" ? row.final_stance : row.stance;
   const stance = stanceLabel(effectiveStance);
-  const quality = row.quality_flags?.length ? "Needs attention" : row.accepted ? "Clear" : "Rejected";
+  const quality = row.attention_required ? "Needs attention" : row.review_status === "reviewed" ? "Reviewed" : row.accepted ? "Clear" : "Rejected";
   return element("button", {
     className: `result-row${resultAttention(row) ? " needs-attention" : ""}`,
     dataset: { clipId: row.clip_id },
@@ -993,7 +996,7 @@ function resultRow(row, run) {
   }, [
     element("span", { className: "pitch-number", text: String(row.pitch_index ?? "—").padStart(2, "0") }),
     element("span", { className: "stance-cell" }, [
-      badge(stance, row.accepted ? "stance" : "danger"),
+      badge(stance, row.accepted || row.review_status === "reviewed" ? "stance" : "danger"),
       ...(row.review_status === "reviewed" && row.model_stance && row.model_stance !== row.final_stance
         ? [element("small", { text: `Model: ${stanceLabel(row.model_stance)}` })]
         : []),
@@ -1005,7 +1008,7 @@ function resultRow(row, run) {
       ]),
     ]),
     element("span", { className: "set-window", text: `${formatTime(row.window_start_seconds)}–${formatTime(row.window_end_seconds)}` }),
-    element("span", { className: "quality-cell" }, [badge(quality, quality === "Clear" ? "success" : quality === "Needs attention" ? "warning" : "danger")]),
+    element("span", { className: "quality-cell" }, [badge(quality, quality === "Clear" || quality === "Reviewed" ? "success" : quality === "Needs attention" ? "warning" : "danger")]),
     element("span", { className: "row-action", text: "Review →" }),
   ]);
 }
@@ -1088,10 +1091,14 @@ function renderResults(runId) {
       element("button", {
         className: "button sheets-button",
         type: "button",
-        text: run.review?.ready ? "Download Excel for official sheet" : `Review ${run.review?.unresolved ?? run.results?.length ?? 0} pitches to export`,
+        text: run.review?.ready ? "Preview official sheet" : `Review ${run.review?.unresolved ?? run.results?.length ?? 0} pitches to export`,
         disabled: !run.review?.ready,
-        on: { click: () => downloadReviewWorkbook(run) },
+        on: { click: () => openSheetPreview(run) },
       }),
+      ...(run.review?.ready && !run.read_only && run.source_cleanup?.status !== "purged" ? [element("button", {
+        className: "button danger-outline", type: "button", text: "Purge source videos",
+        on: { click: () => purgeSourcesWithConfirmation(run) },
+      })] : []),
       run.results_complete
         ? element("a", { className: "button ghost", href: apiUrl(`/api/results/${run.id}/json`), text: "JSON", download: "" })
         : element("button", { className: "button ghost", type: "button", text: "JSON after completion", disabled: true }),
@@ -1160,6 +1167,55 @@ async function downloadReviewWorkbook(run) {
   }
 }
 
+async function openSheetPreview(run) {
+  const previewUrl = apiUrl(`/api/results/${encodeURIComponent(run.id)}/sheet-preview`);
+  try {
+    const response = await fetch(previewUrl, { credentials: "same-origin" });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      const error = new Error(payload.error || `Preview failed (${response.status})`);
+      Object.assign(error, payload);
+      throw error;
+    }
+    const iframe = element("iframe", {
+      className: "sheet-preview-frame",
+      src: previewUrl,
+      title: "Paste-ready catcher pose sheet preview",
+    });
+    clear(workflowDialogContent).append(
+      workflowHeader("Official sheet handoff", "Preview catcher poses", "Review the exact two-column rows before downloading the Excel workbook."),
+      element("div", { className: "sheet-preview-wrap" }, [iframe]),
+      element("div", { className: "dialog-actions" }, [
+        element("button", { className: "button ghost", type: "button", text: "Close", on: { click: closeWorkflow } }),
+        element("button", { className: "button primary", type: "button", text: "Download Excel", on: { click: () => downloadReviewWorkbook(run) } }),
+      ]),
+    );
+    workflowDialog.showModal();
+  } catch (error) {
+    if (error.code === "admin_required") {
+      openAdminUnlock(() => openSheetPreview(run));
+      return;
+    }
+    toast(error.message, "danger");
+  }
+}
+
+function purgeSourcesWithConfirmation(run) {
+  if (!window.confirm("Purge the full source clips for this reviewed game? Compact review clips, results, overrides, and exports will remain.")) return;
+  openAdminUnlock(async () => {
+    try {
+      const response = await purgeSourceClips(run.id);
+      state.runDetails.set(run.id, response.run);
+      state.runs = state.runs.map((item) => item.id === run.id ? response.run : item);
+      toast(`${response.purge.purged_count || 0} source clips purged.`, "success");
+      closeWorkflow();
+      renderResults(run.id);
+    } catch (error) {
+      toast(error.message, "danger");
+    }
+  });
+}
+
 function metadataItem(label, value) {
   return element("div", { className: "metadata-item" }, [
     element("span", { text: label }),
@@ -1168,19 +1224,38 @@ function metadataItem(label, value) {
 }
 
 function openPitch(run, row) {
+  const hasSource = row.media_mode === "source";
   const sourceUrl = apiUrl(`/api/runs/${encodeURIComponent(run.id)}/clips/${encodeURIComponent(row.clip_id)}/video?mode=source`);
   const reviewUrl = apiUrl(`/api/runs/${encodeURIComponent(run.id)}/clips/${encodeURIComponent(row.clip_id)}/video?mode=review`);
   const overlayUrl = apiUrl(`/api/runs/${encodeURIComponent(run.id)}/clips/${encodeURIComponent(row.clip_id)}/overlay.mjpg`);
   const video = element("video", { controls: "", preload: "metadata", src: row.media_mode === "source" ? sourceUrl : reviewUrl });
+  const sourceDuration = element("span", { className: "media-timing-value", text: "Source duration: loading…" });
+  const jumpSet = element("button", { className: "button ghost", type: "button", text: "Jump to set", disabled: true });
+  const jumpEvent = element("button", { className: "button ghost", type: "button", text: "Jump to delivery", disabled: true });
+  const setSeconds = Number(row.window_start_seconds);
+  const eventSeconds = Number(row.impact_seconds);
+  const updateTiming = () => {
+    const duration = Number(video.duration);
+    const valid = Number.isFinite(duration) && duration > 0;
+    const outOfRange = valid && ((Number.isFinite(setSeconds) && setSeconds > duration) || (Number.isFinite(eventSeconds) && eventSeconds > duration));
+    sourceDuration.textContent = valid
+      ? `Source duration: ${formatTime(duration)}${outOfRange ? " · analyzer timestamp outside source" : ""}`
+      : "Source duration unavailable";
+    jumpSet.disabled = !valid || !Number.isFinite(setSeconds) || setSeconds < 0 || setSeconds > duration;
+    jumpEvent.disabled = !valid || !Number.isFinite(eventSeconds) || eventSeconds < 0 || eventSeconds > duration;
+  };
+  jumpSet.addEventListener("click", () => { if (!jumpSet.disabled) video.currentTime = setSeconds; });
+  jumpEvent.addEventListener("click", () => { if (!jumpEvent.disabled) video.currentTime = eventSeconds; });
   video.addEventListener("loadedmetadata", () => {
-    if (row.media_mode !== "review" && Number.isFinite(Number(row.window_start_seconds))) video.currentTime = Number(row.window_start_seconds);
-  }, { once: true });
+    updateTiming();
+  });
   const media = element("div", { className: "pitch-media" }, [video]);
   const sourceButton = element("button", {
-    className: "segmented active",
+    className: `segmented${hasSource ? " active" : ""}`,
     type: "button",
-    text: row.media_mode === "source" ? "Full source" : "Compact review",
+    text: "Full pitch source",
   });
+  const compactButton = element("button", { className: `segmented${hasSource ? "" : " active"}`, type: "button", text: "Compact review" });
   const reviewStatus = element("p", {
     className: "form-status",
     text: run.read_only
@@ -1244,7 +1319,9 @@ function openPitch(run, row) {
           if (updated?.media_mode === "source") {
             Object.assign(row, updated);
             video.src = sourceUrl;
-            sourceButton.textContent = "Full source";
+            sourceButton.textContent = "Full pitch source";
+            sourceButton.classList.add("active");
+            compactButton.classList.remove("active");
             recoverStatus.textContent = "Full source recovered.";
             recoverButton.remove();
             return;
@@ -1266,6 +1343,7 @@ function openPitch(run, row) {
     on: {
       click: () => {
         sourceButton.classList.remove("active");
+        compactButton.classList.remove("active");
         overlayButton.classList.add("active");
         media.replaceChildren(element("div", { className: "overlay-loading" }, [
           element("span", { className: "spinner", "aria-hidden": "true" }),
@@ -1277,8 +1355,19 @@ function openPitch(run, row) {
   });
   sourceButton.addEventListener("click", () => {
     overlayButton.classList.remove("active");
+    compactButton.classList.remove("active");
     sourceButton.classList.add("active");
+    video.src = sourceUrl;
     media.replaceChildren(video);
+    video.load();
+  });
+  compactButton.addEventListener("click", () => {
+    overlayButton.classList.remove("active");
+    sourceButton.classList.remove("active");
+    compactButton.classList.add("active");
+    video.src = reviewUrl;
+    media.replaceChildren(video);
+    video.load();
   });
   const close = element("button", {
     className: "icon-button",
@@ -1296,8 +1385,9 @@ function openPitch(run, row) {
       ]),
       close,
     ]),
-    element("div", { className: "media-mode" }, [sourceButton, overlayButton]),
+    element("div", { className: "media-mode" }, [sourceButton, compactButton, overlayButton]),
     media,
+    element("div", { className: "media-timing" }, [sourceDuration, jumpSet, jumpEvent]),
     element("div", { className: "dialog-body" }, [
       element("div", { className: "metadata-grid" }, [
         metadataItem("Confidence", formatPercent(row.confidence, 1)),

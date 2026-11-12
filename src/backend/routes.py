@@ -32,6 +32,7 @@ from .jobs import (
     run_existing_detection_job,
     run_job,
     request_control,
+    set_job,
     write_job_state,
 )
 from .schedule import (
@@ -46,7 +47,8 @@ from .schedule import (
     validate_season,
 )
 from .storage import job_temp_dir, resolve_manifest_media, resolve_run, run_file, run_lock, validate_identifier
-from .review import build_xlsx, save_review
+from .review import build_sheet_preview_html, build_xlsx, save_review
+from .media_lifecycle import purge_source_clips
 from .source_recovery import recover_source_clip
 from .trumedia import (
     AuthenticationRequired,
@@ -461,6 +463,52 @@ def register_routes(app):
             download_name=f"{run_id}-catcher-review.xlsx",
         )
 
+    @app.get("/api/results/<run_id>/sheet-preview")
+    def preview_results_sheet(run_id: str):
+        if not _admin_authorized():
+            return _error("admin authorization is required", 401, "admin_required")
+        try:
+            validate_identifier(run_id, "run id")
+            location = resolve_run(run_id)
+        except ValueError:
+            return _error("invalid run id", 400)
+        if location is None:
+            return _error("run not found", 404)
+        job = hydrated_job(run_id)
+        if job is None or not job.get("results_complete"):
+            return _error("results are not finalized", 409, "results_incomplete")
+        if not job.get("review", {}).get("ready"):
+            return _error("review every pitch before previewing", 409, "review_incomplete")
+        response = Response(build_sheet_preview_html(job.get("results", [])), mimetype="text/html")
+        response.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
+    @app.post("/api/runs/<run_id>/purge-sources")
+    def purge_run_sources(run_id: str):
+        if not _admin_authorized():
+            return _error("admin authorization is required", 401, "admin_required")
+        try:
+            validate_identifier(run_id, "run id")
+            location = resolve_run(run_id)
+        except ValueError:
+            return _error("invalid run id", 400)
+        if location is None:
+            return _error("run not found", 404)
+        if location.read_only:
+            return _error("sample runs are read-only", 409, "read_only_run")
+        job = hydrated_job(run_id)
+        if job is None or not job.get("results_complete"):
+            return _error("results are not finalized", 409, "results_incomplete")
+        if not job.get("review", {}).get("ready"):
+            return _error("review every pitch before purging source clips", 409, "review_incomplete")
+        try:
+            outcome = purge_source_clips(run_id)
+            set_job(run_id, source_cleanup=outcome)
+        except ValueError as exc:
+            return _error(str(exc), 409, "source_purge_unavailable")
+        return jsonify({"run": hydrated_job(run_id), "purge": outcome})
+
     @app.get("/api/results/<run_id>/<fmt>")
     def export_results(run_id: str, fmt: str):
         if fmt not in {"json", "csv"}:
@@ -493,8 +541,9 @@ def register_routes(app):
             validate_identifier(clip_id, "clip id")
         except ValueError:
             return _error("invalid run or clip id", 400)
+        mode = request.args.get("mode")
         video_path = clip_media(run_id, clip_id)
-        if request.args.get("mode") == "source":
+        if mode == "source":
             location = resolve_run(run_id)
             row = manifest_row(run_id, clip_id)
             video_path = None
@@ -504,6 +553,10 @@ def register_routes(app):
                     video_path = source if source.is_file() else None
                 except ValueError:
                     video_path = None
+        elif mode == "review":
+            location = resolve_run(run_id)
+            candidate = location.path / "artifacts" / f"review-{clip_id}.mp4" if location is not None else None
+            video_path = candidate if candidate is not None and candidate.is_file() else None
         if video_path is None:
             return _error("source clip is not currently available", 404, "source_unavailable")
         return send_file(video_path, mimetype="video/mp4", conditional=True)
@@ -660,7 +713,7 @@ def register_routes(app):
             "message": "Queued",
             "revision": revision,
             "reprocess_of": latest_job_for_game(game["id"])["id"] if reprocess and latest_job_for_game(game["id"]) else None,
-            "retain_sources": bool(payload.get("retain_sources", False)),
+            "retain_sources": bool(payload.get("retain_sources", True)),
             "pitch_limit": pitch_limit,
             "pitch_scope": "duke_catcher",
             "trumedia_match": _public_candidate(match.match),

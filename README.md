@@ -13,6 +13,8 @@ Catcher Stance Detection helps Duke baseball staff turn pitch video into a revie
 
 The supported final labels are `KneeDown - Left`, `KneeDown - Right`, and `Squat`. Existing compact review clips, full source clips when available, pose overlays, quality flags, timing, votes, and provenance remain available in pitch detail.
 
+Results distinguish review blockers from informational evidence. Weak identity, timing, coverage, or classifier evidence requires attention; event-anchor labels, uncertainty metadata, detector provenance, and retry notes remain visible without automatically flagging an otherwise accepted pitch.
+
 ## Quick start
 
 From the project root, install the dependencies described in [`SETUP.md`](SETUP.md), then run:
@@ -57,7 +59,7 @@ The application port is not published directly. Caddy is the only public service
 
 Back up `data/` and the `caddy_data` Docker volume separately. Do not commit `.env`, session JSON files, downloaded media, or runtime state. For complete deployment setup, permissions, DNS, certificate, and troubleshooting details, see [`SETUP.md`](SETUP.md).
 
-To exercise the complete live workflow without processing a whole game, open Run settings in the selected completed game, enter a Test run pitch limit from 1 to 25, and start detection. The run still discovers the game, downloads real pitch clips, classifies them, builds review media, supports analyst review, and enables Excel export after every selected pitch is finalized. Leave the field blank for a normal full-game run.
+To exercise the complete live workflow without processing a whole game, open Run settings in the selected completed game, enter a Test run pitch limit from 1 to 25, and start detection. The run still discovers the game, downloads real pitch clips, classifies them, builds review media, supports analyst review, and enables the local sheet preview and Excel export after every selected pitch is finalized. New web-created runs retain the full pitch source clips through review; after review, export, and confirmation, an authorized analyst can purge those source clips while keeping compact reviews and results. Leave the field blank for a normal full-game run.
 
 While a live run is shown in Active Runs, use Pause to finish the current pitch and keep the run resumable, Stop to finish the current pitch and leave the run stopped, or Cancel to prevent resuming it. Each action asks for confirmation. Paused and stopped runs can be resumed from the same card; canceled runs retain their results until an authorized deletion. Deleting a terminal live run requires the admin token and a second confirmation. The checked-in sample remains read-only.
 

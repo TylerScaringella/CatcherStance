@@ -68,6 +68,8 @@ export const recoverPitchSource = (runId, clipId) =>
   request(`/api/runs/${encodeURIComponent(runId)}/clips/${encodeURIComponent(clipId)}/source-recovery`, {
     method: "POST",
   });
+export const purgeSourceClips = (runId) =>
+  request(`/api/runs/${encodeURIComponent(runId)}/purge-sources`, { method: "POST" });
 export const startRun = (payload) =>
   request("/api/run", { method: "POST", body: JSON.stringify(payload) });
 export const reprocessRun = (gameId, payload) =>

@@ -29,6 +29,11 @@ ACTIVE_STATUSES = {
     "detecting", "building_review", "cleaning_up", "finalizing",
 }
 CONTROL_ACTIONS = {"pause", "stop", "cancel"}
+INFORMATIONAL_QUALITY_FLAGS = {
+    "reduced_batch_pose_retry",
+    "event_anchor",
+    "event_uncertainty_frames",
+}
 PROGRESS_STAGES = (
     "discovering_pitches",
     "downloading",
@@ -106,6 +111,20 @@ def _video_fps(path_text: str) -> float | None:
         return None
 
 
+@lru_cache(maxsize=256)
+def _video_duration(path_text: str) -> float | None:
+    try:
+        import cv2
+
+        capture = cv2.VideoCapture(path_text)
+        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
+        frames = float(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        capture.release()
+        return frames / fps if fps > 0 and frames > 0 else None
+    except Exception:
+        return None
+
+
 def normalize_result(row: dict, location: RunLocation | None = None) -> dict:
     result = dict(row)
     status = str(result.get("status") or "unknown")
@@ -118,12 +137,20 @@ def normalize_result(row: dict, location: RunLocation | None = None) -> dict:
             vote_distribution = {}
 
     fps = _number(result.get("fps"))
-    if fps is None and location is not None:
+    media_path: Path | None = None
+    if location is not None:
         try:
-            media = resolve_manifest_media(location, str(result.get("video_path") or ""))
-            fps = _video_fps(str(media)) if media.is_file() else None
+            candidate = resolve_manifest_media(location, str(result.get("video_path") or ""))
+            if candidate.is_file():
+                media_path = candidate
         except (ValueError, OSError):
-            fps = None
+            pass
+        if media_path is None:
+            candidate = location.path / "artifacts" / f"review-{result.get('clip_id')}.mp4"
+            if candidate.is_file():
+                media_path = candidate
+    if fps is None and location is not None:
+        fps = _video_fps(str(media_path)) if media_path is not None else None
 
     impact_frame = _number(result.get("impact_frame"), int)
     start_frame = _number(result.get("window_start_frame"), int)
@@ -159,12 +186,34 @@ def normalize_result(row: dict, location: RunLocation | None = None) -> dict:
             "vote_distribution": vote_distribution,
             "detector_provenance": _split_csv(result.get("detector_provenance")),
             "quality_flags": _split_csv(result.get("quality_flags")),
+            "media_duration_seconds": _video_duration(str(media_path)) if media_path is not None else None,
         }
     )
     for private_key in (
         "video_path", "saved_path", "download_url", "s3_url", "media_ref", "error",
     ):
         result.pop(private_key, None)
+    return result
+
+
+def _quality_flag_key(flag: str) -> str:
+    return str(flag or "").split(":", 1)[0].strip().lower()
+
+
+def apply_attention_state(result: dict) -> dict:
+    """Add review-facing attention state without changing model result fields."""
+    model_reasons: list[str] = []
+    if not result.get("accepted"):
+        model_reasons.append(str(result.get("rejection_reason") or "classification_rejected"))
+    for flag in result.get("quality_flags") or []:
+        key = _quality_flag_key(flag)
+        if key and key not in INFORMATIONAL_QUALITY_FLAGS:
+            model_reasons.append(str(flag))
+    model_reasons = list(dict.fromkeys(model_reasons))
+    reviewed = result.get("review_status") == "reviewed" and bool(result.get("final_stance"))
+    result["model_attention_reasons"] = model_reasons
+    result["attention_reasons"] = [] if reviewed else model_reasons
+    result["attention_required"] = bool(result["attention_reasons"])
     return result
 
 
@@ -341,7 +390,7 @@ def load_results(location_or_id: RunLocation | str) -> list[dict]:
         rows = partial_rows
     state = load_review_state(location)
     return [
-        enrich_result(normalize_result(row, location), state)
+        apply_attention_state(enrich_result(normalize_result(row, location), state))
         for row in rows
         if isinstance(row, dict)
     ]
