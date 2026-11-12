@@ -24,6 +24,12 @@ The refreshed interface has three linkable work areas:
 - `#/runs`: monitor queued and active work while continuing to use the app
 - `#/results/<run-id>`: review stance totals, quality flags, timing, votes, and video
 
+Results support an analyst review pass before export. Open any pitch, switch between
+the full source clip and compact review, assign a final catcher pose, and optionally
+record a note. Model output remains visible separately from the final reviewed value.
+The Excel export is enabled only after every pitch has a saved final review and
+contains the two-column paste format `Pitch number` and `Catcher Pose`.
+
 The Games workspace loads the persisted active season. Authorized users can use Manage schedule to set the active season or manually refresh Duke's official schedule. Completed and scheduled games can be filtered by opponent, date, site, conference status, result, and analysis status. TruMedia games are resolved from the selected date's Scores dataset using Duke's team ID, opponent, result, and doubleheader game number. Ambiguous matches require explicit confirmation.
 
 Run progress is persisted on disk and refreshed when the browser regains focus, so

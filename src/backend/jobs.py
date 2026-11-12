@@ -9,6 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from .schedule import load_schedule
+from .review import enrich_result, load_review_state, review_summary
 from .storage import (
     RunLocation,
     atomic_write_json,
@@ -283,7 +284,12 @@ def load_results(location_or_id: RunLocation | str) -> list[dict]:
             key=lambda row: int(row.get("pitch_index") or 0),
         )
         rows = partial_rows
-    return [normalize_result(row, location) for row in rows if isinstance(row, dict)]
+    state = load_review_state(location)
+    return [
+        enrich_result(normalize_result(row, location), state)
+        for row in rows
+        if isinstance(row, dict)
+    ]
 
 
 def manifest_rows(location_or_id: RunLocation | str) -> list[dict]:
@@ -419,6 +425,7 @@ def job_from_location(location: RunLocation) -> dict | None:
         "manifest": counts,
         "results": results,
         "result_count": len(results),
+        "review": review_summary(results),
     }
 
     results_complete = (location.path / "detections.json").is_file() and (
