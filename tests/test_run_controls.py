@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from backend.app import create_app
 from backend import jobs, storage
+from backend.schedule import ScheduleUnavailableError
 
 
 def write_job(root: Path, run_id: str, status: str) -> Path:
@@ -70,6 +71,28 @@ class RunControlTests(unittest.TestCase):
             response = client.delete("/api/runs/active-run")
             self.assertEqual(409, response.status_code)
             self.assertEqual("run_active", response.get_json()["code"])
+
+    def test_run_list_survives_unpublished_active_schedule(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(storage, "RUNS_DIR", Path(directory)):
+            run_dir = write_job(Path(directory), "duke-2026-04-21-liberty-legacy", "complete")
+            payload = {
+                "games": [{
+                    "id": "duke-2026-04-21-liberty",
+                    "opponent": "Liberty",
+                    "date": "2026-04-21",
+                }],
+            }
+            job = json.loads((run_dir / "job.json").read_text())
+            job.pop("game")
+            (run_dir / "job.json").write_text(json.dumps(job), encoding="utf-8")
+            with patch.object(
+                jobs,
+                "load_schedule",
+                side_effect=[ScheduleUnavailableError("2027 is not published"), payload],
+            ):
+                response = create_app().test_client().get("/api/runs?view=summary")
+            self.assertEqual(200, response.status_code)
+            self.assertEqual("duke-2026-04-21-liberty", response.get_json()["runs"][0]["game"]["id"])
 
 
 if __name__ == "__main__":
