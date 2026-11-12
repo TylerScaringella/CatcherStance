@@ -1,7 +1,8 @@
 # Pitch event annotation
 
-`pitch_event_annotation_manifest.csv` is a review manifest, not a replacement for the original
-label export. Reviewers fill in the frame fields using the local pitch clips:
+The pitch-event annotation manifest is a local generated review manifest, not a replacement for
+the original label export. Generate it under `research/annotations/generated/` and keep it out of
+version control. Reviewers fill in the frame fields using the local pitch clips:
 
 - `set_start_frame` / `set_end_frame`: stationary catcher set stance.
 - `release_frame`: pitcher release when visible.

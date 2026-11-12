@@ -160,7 +160,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, default=PROCESSED_DATASET_DIR / "keypoints-labeled.csv")
     parser.add_argument("--labels", type=Path, default=RAW_LABELED_VIDEOS_DIR / "labeled-videos-2026-04-22-00-05-e3d836a2.csv")
-    parser.add_argument("--output", type=Path, default=Path("research/outputs/model_audit_summary.json"))
+    parser.add_argument("--output", type=Path, default=Path("research/outputs/generated/model_audit_summary.json"))
     args = parser.parse_args()
     X, y, groups, statuses = load_rows(args.dataset, args.labels)
     labels = sorted(set(y))

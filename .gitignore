@@ -46,3 +46,6 @@ models/external/
 research/outputs/generated/
 
 # Keep notebooks, source files, docs, and the trained lightweight classifier artifacts tracked intentionally.
+# Review manifests and experiment summaries are local generated artifacts.
+research/annotations/generated/
+research/outputs/model_audit_summary.json

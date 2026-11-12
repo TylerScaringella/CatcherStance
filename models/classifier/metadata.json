@@ -28,8 +28,7 @@
   "evaluation": {
     "split_strategy": "GroupShuffleSplit, 20 splits, 20% test, source video prefix grouping",
     "promotion_status": "not_promoted",
-    "event_anchor_policy": "smoothed plate arrival preferred; trajectory endpoint or motion fallback explicitly flagged",
-    "annotation_manifest": "research/annotations/pitch_event_annotation_manifest.csv"
+    "event_anchor_policy": "smoothed plate arrival preferred; trajectory endpoint or motion fallback explicitly flagged"
   },
   "known_limitations": [
     "Class imbalance favors Knee-down Right.",

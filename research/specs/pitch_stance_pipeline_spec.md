@@ -54,10 +54,10 @@ the canonical generated dataset with raw labels, derives source groups, reports 
 aggregate metrics, and records the dataset hash, metadata, environment, split coverage, and
 runtime. Its grouped results are not promotion evidence when a test split lacks a class.
 
-`research/annotations/pitch_event_annotation_manifest.csv` is a versioned pending review set.
-It currently contains 50 Left, 50 Right, and the 4 available Squat labels; blank event fields
-are intentional until a reviewer supplies frame-level annotations. No Squat performance claim
-is made until additional reviewed examples exist.
+The pitch-event annotation manifest is a local pending review set generated under
+`research/annotations/generated/`; it is not a checked-in dataset or ground-truth source. Blank
+event fields are intentional until a reviewer supplies frame-level annotations. No Squat
+performance claim is made until additional reviewed examples exist.
 
 Every event anchor carries an uncertainty interval and an explicit fallback type. Missing ball
 evidence may use the existing motion-followed window, but that path is flagged as fallback and

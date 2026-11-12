@@ -18,7 +18,7 @@ def group_for_video(video: str, row_id: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--labels", type=Path, default=Path("data/raw/labeled_videos/labeled-videos-2026-04-22-00-05-e3d836a2.csv"))
-    parser.add_argument("--output", type=Path, default=Path("research/annotations/pitch_event_annotation_manifest.csv"))
+    parser.add_argument("--output", type=Path, default=Path("research/annotations/generated/pitch_event_annotation_manifest.csv"))
     parser.add_argument("--per-class", type=int, default=50)
     args = parser.parse_args()
 
