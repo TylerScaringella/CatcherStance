@@ -189,8 +189,10 @@ class DukeScheduleProviderTests(unittest.TestCase):
     def test_unpublished_schedule_read_returns_explicit_status(self):
         with patch("backend.routes.schedule_for_season", side_effect=schedule.ScheduleUnavailableError("not published")):
             response = create_app().test_client().get("/api/schedule?season=2027&include_scheduled=1")
-        self.assertEqual(409, response.status_code)
-        self.assertEqual("schedule_unpublished", response.get_json()["code"])
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(2027, response.get_json()["season"])
+        self.assertEqual([], response.get_json()["games"])
+        self.assertTrue(response.get_json()["unpublished"])
 
 
 if __name__ == "__main__":

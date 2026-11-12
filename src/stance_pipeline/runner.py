@@ -171,6 +171,7 @@ def run_game_detection(
     status_callback: StatusCallback | None = None,
     discovery_callback=None,
     progress_callback: ProgressCallback | None = None,
+    max_pitches: int | None = None,
 ) -> list[dict]:
     run_dir = RUNS_DIR / run_id
     download_dir = run_dir / "downloads"
@@ -227,6 +228,7 @@ def run_game_detection(
                 discovery_callback=on_discovery,
                 clip_ready_callback=ready_rows.put,
                 cancel_event=cancel_event,
+                max_pitches=max_pitches,
             )
         except BaseException as exc:
             producer_errors.append(exc)

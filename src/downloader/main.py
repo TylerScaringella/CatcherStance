@@ -16,6 +16,14 @@ from downloader.files import download_one_row
 from downloader.manifest import load_manifest, write_manifest
 
 
+def limit_pitch_rows(rows: list[dict], max_pitches: int | None) -> list[dict]:
+    """Keep the first downloadable pitches for a bounded end-to-end test run."""
+    if max_pitches is None:
+        return rows
+    downloadable = [row for row in rows if not row.get("skip_reason")]
+    return downloadable[:max_pitches]
+
+
 def run_download_pipeline(
     start_url=START_URL,
     download_dir=DOWNLOAD_DIR,
@@ -27,6 +35,7 @@ def run_download_pipeline(
     discovery_callback=None,
     clip_ready_callback=None,
     cancel_event=None,
+    max_pitches: int | None = None,
 ):
     os.makedirs(download_dir, exist_ok=True)
     rows, by_clip_id, by_media_ref = load_manifest(manifest_path)
@@ -48,6 +57,12 @@ def run_download_pipeline(
                 by_media_ref,
                 download_dir=download_dir,
             )
+            rows = limit_pitch_rows(rows, max_pitches)
+            by_clip_id = {row.get("clip_id"): row for row in rows if row.get("clip_id")}
+            by_media_ref = {row.get("media_ref"): row for row in rows if row.get("media_ref")}
+            discovery["selected_pitches"] = len(rows)
+            discovery["downloadable_pitches"] = sum(not row.get("skip_reason") for row in rows)
+            discovery["skipped_pitches"] = sum(bool(row.get("skip_reason")) for row in rows)
             write_manifest(manifest_path, rows)
             print(
                 "Discovered "
@@ -182,6 +197,7 @@ def parse_args():
     parser.add_argument("--storage-state-path", default=STORAGE_STATE_PATH)
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--workers", type=int, default=DOWNLOAD_WORKERS)
+    parser.add_argument("--max-pitches", type=int, default=None, help="Limit this run to the first downloadable pitches")
     return parser.parse_args()
 
 
@@ -194,6 +210,7 @@ def main():
         storage_state_path=args.storage_state_path,
         headless=args.headless,
         download_workers=args.workers,
+        max_pitches=args.max_pitches,
     )
 
 

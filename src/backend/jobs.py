@@ -593,6 +593,7 @@ def job_summary_from_location(location: RunLocation) -> dict | None:
         "message": message,
         "revision": saved.get("revision"),
         "retain_sources": bool(saved.get("retain_sources", False)),
+        "pitch_limit": saved.get("pitch_limit"),
         "created_at": created_at,
         "updated_at": updated_at,
         "manifest": counts,
@@ -724,6 +725,7 @@ def run_job(job_id: str, start_url: str) -> None:
             progress_callback=lambda phase, message, current, total, activate: set_job_progress(
                 job_id, message, current, total, phase=phase, activate=activate
             ),
+            max_pitches=int((hydrated_job(job_id) or {}).get("pitch_limit") or 0) or None,
         )
         from .media_lifecycle import finalize_run_media
 

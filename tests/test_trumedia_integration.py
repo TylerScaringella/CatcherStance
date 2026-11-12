@@ -16,6 +16,7 @@ from backend.trumedia import (
     validate_storage_state_payload,
 )
 from downloader.crawler import parse_pitch_payload
+from downloader.main import limit_pitch_rows
 
 
 def datapoint_payload(columns, rows):
@@ -28,6 +29,16 @@ def datapoint_payload(columns, rows):
 
 
 class TruMediaMatchingTests(unittest.TestCase):
+    def test_bounded_run_keeps_first_downloadable_pitches(self):
+        rows = [
+            {"clip_id": "skip", "skip_reason": "broadcast_video_unavailable"},
+            {"clip_id": "one", "skip_reason": ""},
+            {"clip_id": "two", "skip_reason": ""},
+            {"clip_id": "three", "skip_reason": ""},
+        ]
+        self.assertEqual(["one", "two"], [row["clip_id"] for row in limit_pitch_rows(rows, 2)])
+        self.assertEqual(rows, limit_pitch_rows(rows, None))
+
     def test_real_duke_doubleheader_ids_and_game_numbers_are_parsed(self):
         columns = [
             "gameId", "gameString", "gameDate", "gameStatus", "awayTeamId",
@@ -179,7 +190,7 @@ class TruMediaAdminApiTests(unittest.TestCase):
         with patch("backend.routes.find_game", return_value=self.GAME), patch(
             "backend.routes.resolve_game", side_effect=AuthenticationRequired("missing")
         ):
-            response = client.post("/api/run", json={"game_id": "duke-2026-02-13-maine-1"})
+            response = client.post("/api/run", json={"game_id": "duke-2026-02-13-maine-1", "pitch_limit": 3})
         self.assertEqual(409, response.status_code)
         self.assertEqual("auth_required", response.get_json()["code"])
 
@@ -208,12 +219,21 @@ class TruMediaAdminApiTests(unittest.TestCase):
         ), patch(
             "backend.routes.list_runs", return_value=[]
         ), patch("backend.routes.write_job_state"), patch("backend.routes.threading.Thread.start"):
-            response = client.post("/api/run", json={"game_id": "duke-2026-02-13-maine-1"})
+            response = client.post("/api/run", json={"game_id": "duke-2026-02-13-maine-1", "pitch_limit": 3})
         self.assertEqual(202, response.status_code)
         payload = response.get_json()
         self.assertEqual(1, payload["revision"])
         self.assertFalse(payload["retain_sources"])
+        self.assertEqual(3, payload["pitch_limit"])
         self.assertNotIn("url", payload["trumedia_match"])
+
+    def test_run_rejects_invalid_pitch_limit(self):
+        client = create_app().test_client()
+        for value in (0, 26, "many"):
+            with self.subTest(value=value):
+                response = client.post("/api/run", json={"game_id": "duke-2026-02-13-maine-1", "pitch_limit": value})
+                self.assertEqual(400, response.status_code)
+                self.assertEqual("invalid_pitch_limit", response.get_json()["code"])
 
 
 if __name__ == "__main__":

@@ -108,7 +108,15 @@ def register_routes(app):
         except ValueError as exc:
             return _error(str(exc), 400)
         except ScheduleUnavailableError as exc:
-            return _error(str(exc), 409, "schedule_unpublished")
+            return jsonify({
+                "team": "Duke",
+                "team_id": "duke",
+                "sport": "Baseball",
+                "season": season,
+                "games": [],
+                "unpublished": True,
+                "error": str(exc),
+            })
         except Exception:
             return _error("schedule is temporarily unavailable", 503, "schedule_unavailable")
 
@@ -517,6 +525,16 @@ def register_routes(app):
     def run_detection(payload_override=None, reprocess: bool = False):
         payload = payload_override if payload_override is not None else (request.get_json(silent=True) or {})
         requested_game_id = str(payload.get("game_id") or "")
+        raw_pitch_limit = payload.get("pitch_limit")
+        if raw_pitch_limit in (None, ""):
+            pitch_limit = None
+        else:
+            try:
+                pitch_limit = int(raw_pitch_limit)
+            except (TypeError, ValueError):
+                return _error("pitch_limit must be a whole number from 1 to 25", 400, "invalid_pitch_limit")
+            if not 1 <= pitch_limit <= 25:
+                return _error("pitch_limit must be a whole number from 1 to 25", 400, "invalid_pitch_limit")
         force_redownload = bool(payload.get("force_redownload")) or reprocess
         latest_job = None if force_redownload else latest_job_for_game(requested_game_id)
         if latest_job and latest_job.get("status") == "complete":
@@ -596,6 +614,7 @@ def register_routes(app):
             "revision": revision,
             "reprocess_of": latest_job_for_game(game["id"])["id"] if reprocess and latest_job_for_game(game["id"]) else None,
             "retain_sources": bool(payload.get("retain_sources", False)),
+            "pitch_limit": pitch_limit,
             "pitch_scope": "duke_catcher",
             "trumedia_match": _public_candidate(match.match),
             "result_count": 0,
