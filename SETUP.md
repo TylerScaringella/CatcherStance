@@ -86,6 +86,85 @@ Treat both session files as bearer credentials. They are ignored by Git, must no
 
 For containers, mount `data/auth/` as a private writable volume. Provide both secrets through the deployment secret manager, enable `CATCHER_STANCE_SECURE_COOKIES=1`, and terminate HTTPS before the app. Never bake either session JSON into an image.
 
+## Docker Compose and Caddy deployment
+
+The repository includes `Dockerfile`, `docker-compose.yml`, and `Caddyfile` for a source-based deployment. The app runs in a private container network and Caddy publishes HTTPS for:
+
+```text
+https://catchers.duke.tylerscaringella.com
+```
+
+### First deployment
+
+1. Install Docker Engine and the Docker Compose plugin on the host.
+2. Clone the repository and enter its root directory.
+3. Create the deployment environment file:
+
+   ```bash
+   cp .env.example .env
+   chmod 600 .env
+   ```
+
+4. Edit `.env` and set independent values for `CATCHER_STANCE_ADMIN_TOKEN` and `CATCHER_STANCE_SECRET_KEY`. Set `APP_UID` and `APP_GID` to the numeric host user that owns the checkout (`id -u` and `id -g`) so the container can write the bind-mounted data directory.
+5. Create private runtime directories:
+
+   ```bash
+   mkdir -p data/auth data/cache data/runs data/tmp
+   chmod 700 data/auth data/cache data/runs data/tmp
+   ```
+
+6. Create a DNS A and/or AAAA record for `catchers.duke.tylerscaringella.com` pointing to the deployment host.
+7. Allow inbound TCP ports 80 and 443. Allow UDP 443 if HTTP/3 is desired.
+8. Start the deployment:
+
+   ```bash
+   docker compose up -d --build
+   docker compose ps
+   curl https://catchers.duke.tylerscaringella.com/healthz
+   ```
+
+Caddy obtains and renews the public certificate automatically using `tyler.scaringella@duke.edu` from `Caddyfile`. Certificate state is stored in the `caddy_data` Docker volume. The Flask/Gunicorn port is intentionally not published to the host; only Caddy is public.
+
+### Updates, backups, and operations
+
+After a source update:
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+Useful commands:
+
+```bash
+docker compose logs -f app
+docker compose logs -f caddy
+docker compose restart app
+docker compose restart caddy
+docker compose down
+```
+
+Back up the application data and Caddy certificate state separately:
+
+```bash
+tar -czf catcher-data-backup.tgz data/
+docker run --rm -v catcherstance_caddy_data:/data -v "$PWD":/backup alpine \
+  tar -czf /backup/caddy-data-backup.tgz -C /data .
+```
+
+`data/auth/` contains bearer credentials, including the TruMedia Playwright session. Restrict host permissions, do not include it in source archives or images, and rotate the admin token and Flask secret independently when access changes.
+
+### Deployment troubleshooting
+
+- **DNS does not resolve:** verify the A/AAAA record and wait for DNS propagation before starting or retrying Caddy.
+- **Certificate issuance fails:** confirm ports 80 and 443 reach this host, the hostname is public, and no other service owns those ports. Inspect `docker compose logs caddy`.
+- **Port conflict:** stop the process already using 80/443 or change the deployment host; do not publish the app's internal 8000 port as a workaround.
+- **Permission errors:** set `APP_UID` and `APP_GID` to the checkout owner's IDs and ensure `data/auth`, `data/cache`, `data/runs`, and `data/tmp` are writable by that user.
+- **Chromium is missing:** rebuild with `docker compose build --no-cache app`; the Dockerfile installs Playwright Chromium and its Linux dependencies.
+- **TruMedia is expired:** export a fresh Playwright storage state and upload it through the app's **Connect TruMedia** workflow. Never copy session JSON into the image.
+
+Gunicorn is configured with one worker and multiple threads because background jobs and polling state are process-local. Do not increase the worker count without first moving job state and coordination to a shared service.
+
 ## How To Use The App
 
 1. Start the app with `python src/app.py`.

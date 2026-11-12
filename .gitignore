@@ -4,6 +4,9 @@ __pycache__/
 *$py.class
 .venv/
 venv/
+.env
+.env.*
+!.env.example
 
 # OS/editor noise
 .DS_Store

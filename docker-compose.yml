@@ -1,0 +1,47 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      CATCHER_STANCE_HOST: 0.0.0.0
+      CATCHER_STANCE_PORT: 8000
+      CATCHER_STANCE_SECURE_COOKIES: "1"
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    expose:
+      - "8000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).read()
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  caddy:
+    image: caddy:2.10-alpine
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
