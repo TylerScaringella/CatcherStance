@@ -23,6 +23,7 @@ EXAMPLES_DIR = DATA_DIR / "examples"
 SCHEDULES_DIR = DATA_DIR / "schedules"
 SCHEDULE_PATH = SCHEDULES_DIR / "duke_baseball_2026.json"
 RUNTIME_SCHEDULE_PATH = CACHE_DIR / "duke_baseball_2026.json"
+SCHEDULE_SETTINGS_PATH = CACHE_DIR / "schedule_settings.json"
 
 CLASSIFIER_DIR = MODELS_DIR / "classifier"
 EXTERNAL_MODELS_DIR = MODELS_DIR / "external"

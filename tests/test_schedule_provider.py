@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend import schedule
+from backend.app import create_app
 
 
 FIXTURE = """
@@ -48,6 +49,13 @@ class DukeScheduleProviderTests(unittest.TestCase):
         with patch("backend.schedule.load_schedule", return_value=payload):
             completed = schedule.completed_schedule()
         self.assertEqual(4, len(completed["games"]))
+
+    def test_full_schedule_mode_preserves_scheduled_games(self):
+        payload = {"team": "Duke", "season": 2026, "games": schedule.parse_duke_schedule_table(FIXTURE, 2026)}
+        with patch("backend.routes.schedule_for_season", return_value=payload):
+            response = create_app().test_client().get("/api/schedule?season=2026&include_scheduled=1")
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(5, len(response.get_json()["games"]))
 
     def test_stale_cache_is_used_when_refresh_fails(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(
@@ -98,6 +106,57 @@ class DukeScheduleProviderTests(unittest.TestCase):
         for invalid in ("bad", 1999, 9999):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 schedule.validate_season(invalid)
+
+    def test_active_season_persists_and_reloads(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            schedule, "SCHEDULE_SETTINGS_PATH", Path(directory) / "settings.json"
+        ):
+            saved = schedule.set_active_season(2027)
+            self.assertEqual(2027, saved["active_season"])
+            self.assertEqual(2027, schedule.load_schedule_settings()["active_season"])
+
+    def test_schedule_provider_rejects_upstream_wrong_season(self):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b"<title>2026 Baseball Schedule - Duke University</title>"
+
+        with patch("backend.schedule.urlopen", return_value=Response()), self.assertRaisesRegex(
+            schedule.ScheduleUnavailableError, "requested 2027"
+        ):
+            schedule.DukeScheduleProvider().fetch(2027)
+
+    def test_schedule_management_requires_admin_and_refreshes(self):
+        payload = self.payload(2027)
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            schedule, "SCHEDULE_SETTINGS_PATH", Path(directory) / "settings.json"
+        ), patch.object(schedule, "CACHE_DIR", Path(directory) / "cache"), patch.object(
+            schedule.PROVIDERS["duke"], "fetch", return_value=payload
+        ):
+            client = create_app().test_client()
+            self.assertEqual(401, client.put("/api/teams/duke/schedule-settings", json={"active_season": 2027}).status_code)
+            with client.session_transaction() as session:
+                session["trumedia_admin"] = True
+            response = client.put("/api/teams/duke/schedule-settings", json={"active_season": 2027})
+            self.assertEqual(200, response.status_code)
+            refreshed = client.post("/api/teams/duke/schedule/refresh", json={"season": 2027})
+            self.assertEqual(200, refreshed.status_code)
+            self.assertEqual(2027, refreshed.get_json()["settings"]["active_season"])
+            self.assertEqual(2027, refreshed.get_json()["schedule"]["season"])
+
+    def test_unpublished_schedule_returns_explicit_status(self):
+        with patch("backend.routes.refresh_schedule", side_effect=schedule.ScheduleUnavailableError("not published")):
+            client = create_app().test_client()
+            with client.session_transaction() as session:
+                session["trumedia_admin"] = True
+            response = client.post("/api/teams/duke/schedule/refresh", json={"season": 2027})
+        self.assertEqual(409, response.status_code)
+        self.assertEqual("schedule_unpublished", response.get_json()["code"])
 
 
 if __name__ == "__main__":

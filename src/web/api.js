@@ -21,8 +21,19 @@ export async function request(path, options = {}) {
   return payload;
 }
 
-export const getSchedule = (season = 2026) => request(`/api/schedule?season=${encodeURIComponent(season)}`);
+export const getSchedule = (season = 2026) => request(`/api/schedule?season=${encodeURIComponent(season)}&include_scheduled=1`);
 export const getSeasons = () => request("/api/teams/duke/seasons");
+export const getScheduleSettings = () => request("/api/teams/duke/schedule-settings");
+export const setActiveSeason = (season) =>
+  request("/api/teams/duke/schedule-settings", {
+    method: "PUT",
+    body: JSON.stringify({ active_season: Number(season) }),
+  });
+export const refreshSchedule = (season) =>
+  request("/api/teams/duke/schedule/refresh", {
+    method: "POST",
+    body: JSON.stringify({ season: Number(season) }),
+  });
 export const getRuns = () => request("/api/runs");
 export async function getRunSummaries(etag = null, signal = undefined) {
   const response = await fetch(apiUrl("/api/runs?view=summary"), {

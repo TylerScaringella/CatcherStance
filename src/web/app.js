@@ -4,9 +4,12 @@ import {
   getRun,
   getRunSummaries,
   getSchedule,
+  getScheduleSettings,
   getSeasons,
   getTruMediaStatus,
+  refreshSchedule,
   reprocessRun,
+  setActiveSeason,
   startRun,
   unlockAdmin,
   uploadTruMediaSession,
@@ -38,8 +41,10 @@ const state = {
   conferenceFilter: "all",
   dateFrom: "",
   dateTo: "",
-  season: 2026,
-  seasons: [2026],
+  season: null,
+  activeSeason: null,
+  seasons: [],
+  scheduleSettings: null,
   trumedia: { status: "missing", connected: false },
   resultSearch: "",
   stanceFilter: "all",
@@ -320,6 +325,19 @@ function workspaceContext(section, detail = "2026 season") {
   ]);
 }
 
+function scheduleFreshness(settings = state.scheduleSettings, schedule = state.schedule) {
+  if (settings?.error) return `Needs refresh · ${settings.error}`;
+  if (schedule?.stale || settings?.stale) return "Using cached schedule · refresh recommended";
+  if (settings?.last_successful_refresh_at) return `Updated ${formatDateTime(settings.last_successful_refresh_at)}`;
+  return "Not refreshed yet";
+}
+
+function formatDateTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
 function progressBar(run) {
   const progress = run.progress || {};
   const percent = progress.percent == null ? null : Number(progress.percent);
@@ -375,6 +393,12 @@ function progressBar(run) {
 }
 
 function gameRunAction(game, run) {
+  if (game.status !== "completed") {
+    return element("div", { className: "hero-actions" }, [
+      badge("Scheduled", "neutral"),
+      element("span", { className: "muted", text: "Analysis becomes available after the game is completed." }),
+    ]);
+  }
   if (run?.status === "complete") {
     return element("div", { className: "hero-actions", dataset: { runAction: run.id, actionKind: "game", actionState: "complete" } }, [
       element("a", { className: "button primary", href: `#/results/${run.id}`, text: "Review results" }),
@@ -442,12 +466,80 @@ function gameCard(game) {
     type: "button",
     on: { click: () => { state.selectedGameId = game.id; render(); } },
   }, [
-    element("span", { className: "schedule-date", text: formatDate(game.date).replace(", 2026", "") }),
+    element("span", { className: "schedule-date", text: formatDate(game.date).replace(/, \d{4}/, "") }),
     element("span", { className: "schedule-opponent", text: game.opponent }),
     element("span", { className: "schedule-meta", text: `${game.location} · ${game.result || "Scheduled"}` }),
-    element("span", { className: "schedule-link", text: run ? `${run.result_count || 0} pitches` : "Ready for analysis" }),
+    element("span", { className: "schedule-link", text: run ? `${run.result_count || 0} pitches` : game.status === "completed" ? "Ready for analysis" : "Upcoming" }),
     run ? runBadge(run) : badge("Not run"),
   ]);
+}
+
+function openScheduleManagement() {
+  const token = element("input", { type: "password", autocomplete: "current-password", placeholder: "Admin token", "aria-label": "Admin token" });
+  const season = element("select", { "aria-label": "Schedule management season" },
+    state.seasons.map((year) => element("option", { value: year, text: `${year} season`, selected: year === state.season })));
+  const status = element("p", { className: "form-status", text: scheduleFreshness() });
+  const setButton = element("button", {
+    className: "button secondary", type: "button", text: "Set as current",
+    on: { click: async () => {
+      setButton.disabled = true;
+      status.textContent = "Saving active season…";
+      try {
+        await unlockAdmin(token.value);
+        state.scheduleSettings = await setActiveSeason(season.value);
+        state.activeSeason = state.scheduleSettings.active_season;
+        state.season = Number(season.value);
+        state.selectedGameId = null;
+        state.schedule = await getSchedule(state.season);
+        toast(`${state.activeSeason} is now the active season.`, "success");
+        status.textContent = scheduleFreshness();
+        renderGames();
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        setButton.disabled = false;
+      }
+    } },
+  });
+  const refreshButton = element("button", {
+    className: "button primary", type: "button", text: "Refresh from Duke",
+    on: { click: async () => {
+      refreshButton.disabled = true;
+      status.textContent = "Fetching the official Duke schedule…";
+      try {
+        await unlockAdmin(token.value);
+        const response = await refreshSchedule(season.value);
+        state.scheduleSettings = response.settings;
+        if (Number(season.value) === state.season) state.schedule = response.schedule;
+        toast(
+          response.schedule.stale ? `${season.value} schedule is unchanged; cached data is being shown.` : `${season.value} schedule refreshed.`,
+          response.schedule.stale ? "info" : "success",
+        );
+        status.textContent = scheduleFreshness(response.settings, response.schedule);
+        renderGames();
+      } catch (error) {
+        status.textContent = error.code === "schedule_unpublished"
+          ? `Duke has not published the ${season.value} schedule yet.`
+          : error.message;
+      } finally {
+        refreshButton.disabled = false;
+      }
+    } },
+  });
+  clear(workflowDialogContent).append(
+    workflowHeader("Schedule administration", "Duke Baseball schedule", "Choose the active season or fetch the latest official schedule. Schedule changes require the existing admin token."),
+    element("div", { className: "workflow-body" }, [
+      element("label", { className: "field" }, [element("span", { text: "Season" }), season]),
+      element("label", { className: "field" }, [element("span", { text: "Admin token" }), token]),
+      element("div", { className: "schedule-freshness", "aria-live": "polite" }, [status]),
+      element("div", { className: "dialog-actions" }, [
+        element("button", { className: "button ghost", type: "button", text: "Cancel", on: { click: closeWorkflow } }),
+        setButton,
+        refreshButton,
+      ]),
+    ]),
+  );
+  workflowDialog.showModal();
 }
 
 function renderGames() {
@@ -510,12 +602,20 @@ function renderGames() {
       }
     } },
   }, state.seasons.map((year) => element("option", { value: year, text: `${year} season`, selected: year === state.season })));
+  const scheduleButton = element("button", {
+    className: "button ghost", type: "button", text: "Manage schedule",
+    on: { click: openScheduleManagement },
+  });
   section.append(pageHeader(
     `${state.season} Duke Baseball`,
     "Game workspace",
-    "Search completed games, connect them to TruMedia, and move directly into pitch-level review.",
-    [seasonSelect],
+    "Search the official schedule, connect completed games to TruMedia, and move directly into pitch-level review.",
+    [seasonSelect, scheduleButton],
   ));
+  section.append(element("div", { className: `schedule-status ${state.schedule?.stale ? "stale" : "fresh"}`, "aria-live": "polite" }, [
+    element("strong", { text: state.schedule?.games?.length ? `${state.schedule.games.length} games loaded` : "Schedule not published" }),
+    element("span", { text: scheduleFreshness() }),
+  ]));
   const layout = element("div", { className: "games-layout" });
   const rail = element("aside", { className: "schedule-panel", "aria-label": "Game schedule" }, [
     element("div", { className: "panel-toolbar" }, [search, filter]),
@@ -1163,14 +1263,17 @@ async function routeChanged() {
 
 async function bootstrap() {
   try {
-    const [schedule, seasonsPayload, trumedia, summaries] = await Promise.all([
-      getSchedule(state.season),
+    const [scheduleSettings, seasonsPayload, trumedia, summaries] = await Promise.all([
+      getScheduleSettings(),
       getSeasons(),
       getTruMediaStatus(),
       getRunSummaries(),
     ]);
-    state.schedule = schedule;
-    state.seasons = seasonsPayload.seasons || [2026];
+    state.scheduleSettings = scheduleSettings;
+    state.activeSeason = scheduleSettings.active_season;
+    state.season = scheduleSettings.active_season;
+    state.schedule = await getSchedule(state.season);
+    state.seasons = seasonsPayload.seasons || [state.season];
     state.trumedia = trumedia;
     state.runs = summaries.payload?.runs || [];
     state.runsEtag = summaries.etag;
