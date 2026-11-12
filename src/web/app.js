@@ -8,6 +8,8 @@ import {
   getSeasons,
   getTruMediaStatus,
   refreshSchedule,
+  recoverPitchSource,
+  savePitchReview,
   reprocessRun,
   setActiveSeason,
   startRun,
@@ -86,6 +88,11 @@ function stanceLabel(value) {
     Squat: "Squat",
     Abstained: "Abstained",
   }[stanceKey(value)] || String(value || "Abstained");
+}
+
+function reviewStance(value) {
+  const key = stanceKey(value);
+  return { LKD: "KneeDown - Left", RKD: "KneeDown - Right", Squat: "Squat" }[key] || "";
 }
 
 function resultAttention(row) {
@@ -855,7 +862,8 @@ function filteredResultRows(run) {
 }
 
 function resultRow(row, run) {
-  const stance = stanceLabel(row.stance);
+  const effectiveStance = row.review_status === "reviewed" ? row.final_stance : row.stance;
+  const stance = stanceLabel(effectiveStance);
   const quality = row.quality_flags?.length ? "Needs attention" : row.accepted ? "Clear" : "Rejected";
   return element("button", {
     className: `result-row${resultAttention(row) ? " needs-attention" : ""}`,
@@ -866,7 +874,9 @@ function resultRow(row, run) {
     element("span", { className: "pitch-number", text: String(row.pitch_index ?? "—").padStart(2, "0") }),
     element("span", { className: "stance-cell" }, [
       badge(stance, row.accepted ? "stance" : "danger"),
-      ...(row.stance && row.stance !== stance ? [element("small", { text: row.stance })] : []),
+      ...(row.review_status === "reviewed" && row.model_stance && row.model_stance !== row.final_stance
+        ? [element("small", { text: `Model: ${stanceLabel(row.model_stance)}` })]
+        : []),
     ]),
     element("span", { className: "confidence-cell" }, [
       element("strong", { text: formatPercent(row.confidence, 1) }),
@@ -955,7 +965,13 @@ function renderResults(runId) {
     `${run.game?.opponent || "Run"} results`,
     `${run.game?.opponent || "Selected game"} · ${formatDate(run.game?.date)} · ${run.result_count} pitch classifications`,
     [
-      element("button", { className: "button sheets-button", type: "button", text: "Export to GameTracker", on: { click: () => openGameTracker(run) } }),
+      element("button", {
+        className: "button sheets-button",
+        type: "button",
+        text: run.review?.ready ? "Download Excel for official sheet" : `Review ${run.review?.unresolved ?? run.results?.length ?? 0} pitches to export`,
+        disabled: !run.review?.ready,
+        on: { click: () => downloadReviewWorkbook(run) },
+      }),
       run.results_complete
         ? element("a", { className: "button ghost", href: apiUrl(`/api/results/${run.id}/json`), text: "JSON", download: "" })
         : element("button", { className: "button ghost", type: "button", text: "JSON after completion", disabled: true }),
@@ -1005,6 +1021,25 @@ function renderResults(runId) {
   clear(content).append(section);
 }
 
+async function downloadReviewWorkbook(run) {
+  try {
+    const response = await fetch(apiUrl(`/api/results/${encodeURIComponent(run.id)}/xlsx`), { credentials: "same-origin" });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || `Export failed (${response.status})`);
+    }
+    const blob = await response.blob();
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${run.id}-catcher-review.xlsx`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    toast("Excel review sheet downloaded.", "success");
+  } catch (error) {
+    toast(error.message, "danger");
+  }
+}
+
 function metadataItem(label, value) {
   return element("div", { className: "metadata-item" }, [
     element("span", { text: label }),
@@ -1013,9 +1048,10 @@ function metadataItem(label, value) {
 }
 
 function openPitch(run, row) {
-  const sourceUrl = apiUrl(`/api/runs/${encodeURIComponent(run.id)}/clips/${encodeURIComponent(row.clip_id)}/video`);
+  const sourceUrl = apiUrl(`/api/runs/${encodeURIComponent(run.id)}/clips/${encodeURIComponent(row.clip_id)}/video?mode=source`);
+  const reviewUrl = apiUrl(`/api/runs/${encodeURIComponent(run.id)}/clips/${encodeURIComponent(row.clip_id)}/video?mode=review`);
   const overlayUrl = apiUrl(`/api/runs/${encodeURIComponent(run.id)}/clips/${encodeURIComponent(row.clip_id)}/overlay.mjpg`);
-  const video = element("video", { controls: "", preload: "metadata", src: sourceUrl });
+  const video = element("video", { controls: "", preload: "metadata", src: row.media_mode === "source" ? sourceUrl : reviewUrl });
   video.addEventListener("loadedmetadata", () => {
     if (row.media_mode !== "review" && Number.isFinite(Number(row.window_start_seconds))) video.currentTime = Number(row.window_start_seconds);
   }, { once: true });
@@ -1023,8 +1059,75 @@ function openPitch(run, row) {
   const sourceButton = element("button", {
     className: "segmented active",
     type: "button",
-    text: row.media_mode === "review" ? "Compact review" : "Source clip",
+    text: row.media_mode === "source" ? "Full source" : "Compact review",
   });
+  const reviewStatus = element("p", {
+    className: "form-status",
+    text: row.review_status === "reviewed" ? `Reviewed ${formatDateTime(row.reviewed_at)}` : "This pitch still needs a final stance.",
+  });
+  const reviewSelect = element("select", { "aria-label": "Final catcher pose" }, [
+    ["", "Select final catcher pose"],
+    ["KneeDown - Left", "KneeDown - Left"],
+    ["KneeDown - Right", "KneeDown - Right"],
+    ["Squat", "Squat"],
+  ].map(([value, text]) => element("option", { value, text, selected: reviewStance(row.final_stance || row.stance) === value })));
+  const reviewNote = element("textarea", { rows: 2, placeholder: "Optional review note", "aria-label": "Review note" });
+  reviewNote.value = row.review_note || "";
+  const saveReviewButton = element("button", {
+    className: "button primary", type: "button", text: "Save final stance", disabled: run.read_only,
+    on: { click: async () => {
+      if (!reviewSelect.value) {
+        reviewStatus.textContent = "Select a final catcher pose first.";
+        return;
+      }
+      saveReviewButton.disabled = true;
+      saveReviewButton.textContent = "Saving…";
+      try {
+        const response = await savePitchReview(run.id, row.clip_id, { stance: reviewSelect.value, note: reviewNote.value });
+        Object.assign(row, response.result);
+        run.review = response.summary || run.review;
+        state.runDetails.set(run.id, run);
+        toast("Pitch review saved.", "success");
+        pitchDialog.close();
+        renderResults(run.id);
+      } catch (error) {
+        reviewStatus.textContent = error.message;
+        saveReviewButton.disabled = false;
+        saveReviewButton.textContent = "Save final stance";
+      }
+    } },
+  });
+  const recoverStatus = element("p", { className: "form-status", text: "The full source clip is not currently retained." });
+  const recoverButton = !run.read_only && row.media_mode !== "source" ? element("button", {
+    className: "button secondary", type: "button", text: "Recover full source",
+    on: { click: async () => {
+      recoverButton.disabled = true;
+      recoverButton.textContent = "Recovering…";
+      recoverStatus.textContent = "Requesting the source clip through the authenticated TruMedia session.";
+      try {
+        await recoverPitchSource(run.id, row.clip_id);
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 1000));
+          const refreshed = await getRun(run.id);
+          const updated = refreshed.results?.find((item) => item.clip_id === row.clip_id);
+          if (updated?.media_mode === "source") {
+            Object.assign(row, updated);
+            video.src = sourceUrl;
+            sourceButton.textContent = "Full source";
+            recoverStatus.textContent = "Full source recovered.";
+            recoverButton.remove();
+            return;
+          }
+          if (refreshed.source_recovery?.status === "failed") throw new Error(refreshed.source_recovery.error || "Source recovery failed.");
+        }
+        throw new Error("Source recovery is still pending. Refresh this pitch later.");
+      } catch (error) {
+        recoverStatus.textContent = error.message;
+        recoverButton.disabled = false;
+        recoverButton.textContent = "Try source recovery again";
+      }
+    } },
+  }) : null;
   const overlayButton = element("button", {
     className: "segmented",
     type: "button",
@@ -1057,8 +1160,8 @@ function openPitch(run, row) {
     element("header", { className: "dialog-header" }, [
       element("div", {}, [
         element("p", { className: "eyebrow", text: `${run.game?.opponent || "Game review"} · Pitch ${row.pitch_index}` }),
-        element("h2", { id: "pitchDialogTitle", text: stanceLabel(row.stance) }),
-        element("p", { className: "muted", text: `${formatDate(run.game?.date)} · ${row.clip_id}` }),
+        element("h2", { id: "pitchDialogTitle", text: row.review_status === "reviewed" ? stanceLabel(row.final_stance) : "Needs final review" }),
+        element("p", { className: "muted", text: `${formatDate(run.game?.date)} · ${row.clip_id} · Model: ${stanceLabel(row.model_stance || row.stance)}` }),
       ]),
       close,
     ]),
@@ -1085,6 +1188,13 @@ function openPitch(run, row) {
           ),
         ),
       ]),
+      element("section", { className: "detail-section review-editor" }, [
+        element("h3", { text: "Final review" }),
+        element("label", { className: "field" }, [element("span", { text: "Catcher Pose" }), reviewSelect]),
+        element("label", { className: "field" }, [element("span", { text: "Review note" }), reviewNote]),
+        reviewStatus,
+        element("div", { className: "dialog-actions" }, [saveReviewButton]),
+      ]),
       element("section", { className: "detail-section" }, [
         element("h3", { text: "Quality and provenance" }),
         element("div", { className: "tag-list" }, [
@@ -1092,6 +1202,7 @@ function openPitch(run, row) {
           ...(row.detector_provenance || []).map((item) => badge(statusLabel(item), "neutral")),
         ]),
       ]),
+      ...(recoverButton ? [element("section", { className: "detail-section" }, [element("h3", { text: "Full source" }), recoverStatus, recoverButton])] : []),
       element("section", { className: "detail-section" }, [
         element("h3", { text: "Review action" }),
         element("p", { className: "muted", text: resultAttention(row) ? "This pitch needs analyst attention before it is treated as a clear classification." : "This pitch is ready for review or export." }),

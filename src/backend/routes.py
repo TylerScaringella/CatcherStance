@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import tempfile
@@ -25,7 +26,9 @@ from .jobs import (
     latest_job_for_game,
     list_runs,
     list_run_summaries,
+    manifest_row,
     run_existing_detection_job,
+    set_job,
     run_job,
     write_job_state,
 )
@@ -40,7 +43,9 @@ from .schedule import (
     set_active_season,
     validate_season,
 )
-from .storage import job_temp_dir, resolve_run, run_file, run_lock, validate_identifier
+from .storage import job_temp_dir, resolve_manifest_media, resolve_run, run_file, run_lock, validate_identifier
+from .review import build_xlsx, save_review
+from .source_recovery import recover_source_clip
 from .trumedia import (
     AuthenticationRequired,
     TruMediaProvider,
@@ -302,6 +307,107 @@ def register_routes(app):
     def game_statuses():
         return jsonify(game_status_summary())
 
+    @app.put("/api/runs/<run_id>/clips/<clip_id>/review")
+    def save_pitch_review(run_id: str, clip_id: str):
+        if not _admin_authorized():
+            return _error("admin authorization is required", 401, "admin_required")
+        try:
+            validate_identifier(run_id, "run id")
+            validate_identifier(clip_id, "clip id")
+        except ValueError:
+            return _error("invalid run or clip id", 400)
+        location = resolve_run(run_id)
+        if location is None:
+            return _error("run not found", 404)
+        if location.read_only:
+            return _error("sample runs are read-only", 409, "read_only_run")
+        result = clip_result(run_id, clip_id)
+        if result is None:
+            return _error("pitch clip not found", 404)
+        payload = request.get_json(silent=True) or {}
+        try:
+            entry = save_review(location, clip_id, str(payload.get("stance") or ""), payload.get("note", ""))
+        except ValueError as exc:
+            return _error(str(exc), 400, "invalid_review")
+        refreshed_job = hydrated_job(run_id)
+        refreshed = next(
+            row for row in refreshed_job.get("results", [])
+            if row.get("clip_id") == clip_id
+        )
+        return jsonify({"result": refreshed, "review": entry, "summary": refreshed_job.get("review", {})})
+
+    @app.post("/api/runs/<run_id>/clips/<clip_id>/source-recovery")
+    def recover_pitch_source(run_id: str, clip_id: str):
+        if not _admin_authorized():
+            return _error("admin authorization is required", 401, "admin_required")
+        try:
+            validate_identifier(run_id, "run id")
+            validate_identifier(clip_id, "clip id")
+        except ValueError:
+            return _error("invalid run or clip id", 400)
+        location = resolve_run(run_id)
+        if location is None:
+            return _error("run not found", 404)
+        if location.read_only:
+            return _error("sample runs are read-only", 409, "read_only_run")
+        manifest = manifest_row(run_id, clip_id)
+        if clip_media(run_id, clip_id) is not None and manifest is not None:
+            row = manifest
+            try:
+                source = resolve_manifest_media(location, row.get("saved_path", ""))
+                if source.is_file():
+                    return jsonify({"status": "ready", "clip_id": clip_id})
+            except ValueError:
+                pass
+        job = hydrated_job(run_id)
+        recovery = job.get("source_recovery") if job else None
+        if recovery and recovery.get("clip_id") == clip_id and recovery.get("status") == "running":
+            return jsonify(recovery), 202
+        set_job(run_id, source_recovery={"clip_id": clip_id, "status": "running"})
+
+        def recover() -> None:
+            try:
+                recover_source_clip(run_id, clip_id)
+                set_job(run_id, source_recovery={"clip_id": clip_id, "status": "ready"})
+            except AuthenticationRequired as exc:
+                set_job(run_id, source_recovery={"clip_id": clip_id, "status": "failed", "code": exc.code, "error": str(exc)})
+            except Exception as exc:
+                set_job(run_id, source_recovery={"clip_id": clip_id, "status": "failed", "code": type(exc).__name__, "error": str(exc)})
+
+        threading.Thread(target=recover, daemon=True).start()
+        return jsonify({"clip_id": clip_id, "status": "running"}), 202
+
+    @app.get("/api/results/<run_id>/xlsx")
+    def export_results_xlsx(run_id: str):
+        if not _admin_authorized():
+            return _error("admin authorization is required", 401, "admin_required")
+        try:
+            location = resolve_run(run_id)
+        except ValueError:
+            return _error("invalid run id", 400)
+        if location is None:
+            return _error("run not found", 404)
+        job = hydrated_job(run_id)
+        if job is None or not job.get("results_complete"):
+            return _error("results are not finalized", 409, "results_incomplete")
+        unresolved = [row.get("pitch_index") for row in job.get("results", []) if row.get("review_status") != "reviewed"]
+        if unresolved:
+            return _error(
+                "review every pitch before exporting",
+                409,
+                "review_incomplete",
+                reviewed=len(job.get("results", [])) - len(unresolved),
+                unresolved=len(unresolved),
+                unresolved_pitch_numbers=unresolved,
+            )
+        workbook = build_xlsx(job.get("results", []))
+        return send_file(
+            io.BytesIO(workbook),
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=f"{run_id}-catcher-review.xlsx",
+        )
+
     @app.get("/api/results/<run_id>/<fmt>")
     def export_results(run_id: str, fmt: str):
         if fmt not in {"json", "csv"}:
@@ -335,8 +441,18 @@ def register_routes(app):
         except ValueError:
             return _error("invalid run or clip id", 400)
         video_path = clip_media(run_id, clip_id)
+        if request.args.get("mode") == "source":
+            location = resolve_run(run_id)
+            row = manifest_row(run_id, clip_id)
+            video_path = None
+            if location is not None and row is not None:
+                try:
+                    source = resolve_manifest_media(location, row.get("saved_path", ""))
+                    video_path = source if source.is_file() else None
+                except ValueError:
+                    video_path = None
         if video_path is None:
-            return _error("clip not found", 404)
+            return _error("source clip is not currently available", 404, "source_unavailable")
         return send_file(video_path, mimetype="video/mp4", conditional=True)
 
     @app.get("/api/jobs/<run_id>/clips/<clip_id>/overlay.mjpg")

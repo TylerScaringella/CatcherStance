@@ -52,6 +52,15 @@ export async function getRunSummaries(etag = null, signal = undefined) {
 }
 export const getTruMediaStatus = () => request("/api/integrations/trumedia/status");
 export const getRun = (runId, options = {}) => request(`/api/runs/${encodeURIComponent(runId)}`, options);
+export const savePitchReview = (runId, clipId, payload) =>
+  request(`/api/runs/${encodeURIComponent(runId)}/clips/${encodeURIComponent(clipId)}/review`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+export const recoverPitchSource = (runId, clipId) =>
+  request(`/api/runs/${encodeURIComponent(runId)}/clips/${encodeURIComponent(clipId)}/source-recovery`, {
+    method: "POST",
+  });
 export const startRun = (payload) =>
   request("/api/run", { method: "POST", body: JSON.stringify(payload) });
 export const reprocessRun = (gameId, payload) =>
