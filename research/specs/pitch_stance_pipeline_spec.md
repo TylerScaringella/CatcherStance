@@ -101,3 +101,38 @@ function analyze_pitch_clip(video):
 - Crop-based pose inference changed the legacy MLP input distribution. PHC therefore guides
   full-frame pose selection until the classifier is retrained on crop-derived features.
 - The previous last-seven-valid-frames path changed four clips from pre-impact `LKD` to post-pitch `RKD`.
+
+## Abstention telemetry and review policy
+
+Pitch-level abstention is distinct from a rejected frame. The analyzer records an
+`abstention_stage`, stable `abstention_reason`, event-anchor state, pose/window
+statistics, and catcher-selector rejection counts in `PitchStanceResult.diagnostics`.
+The public result fields and API payloads remain unchanged.
+
+Run a current-pipeline audit with:
+
+```bash
+PYTHONPATH=src ./.venv/bin/python research/scripts/audit_abstentions.py
+```
+
+Decision-only recovery experiments can be replayed against the generated report:
+
+```bash
+PYTHONPATH=src ./.venv/bin/python research/scripts/replay_abstention_recovery.py
+```
+
+The replay is review evidence, not a production threshold change. A vote relaxation
+is blocked unless event timing, temporal coverage, and catcher identity continuity
+are all present.
+
+The audit writes the tracked aggregate to
+`research/outputs/abstention_audit_summary.json` and generated per-clip diagnostics
+under `research/outputs/generated/`. Local clips that do not match the exported raw
+label CSV are still audited and are explicitly counted as unlabeled; they must not be
+silently dropped. The historical frame-level summary is reported separately and must
+not be used as the current staged-analyzer abstention rate.
+
+Recovery changes are eligible for promotion only when they improve valid-pitch
+coverage on a reviewed holdout without increasing catcher identity swaps, post-event
+windows, or ambiguous low-confidence labels. Missing timing evidence, ambiguous
+identity, and insufficient temporal coverage remain conservative abstentions.

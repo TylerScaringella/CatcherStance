@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import numpy as np
 
+from catcher_detection.detector import detect_catcher
 from project_paths import CLASSIFIER_METADATA_PATH
 from stance_pipeline.analyzer import (
     PitchStanceConfig,
@@ -161,6 +162,22 @@ class PipelineContractTests(unittest.TestCase):
         observations = [pose(index * 2) for index in range(6)]
         observations.append(pose(12, swapped=True))
         self.assertTrue(RollingMLPClassifier._has_joint_side_swap(observations))
+
+    def test_catcher_abstention_keeps_structured_reason(self):
+        diagnostics = {}
+        self.assertIsNone(detect_catcher(None, diagnostics=diagnostics))
+        self.assertEqual("frame_gate", diagnostics["stage"])
+        self.assertEqual("no_pose_detections", diagnostics["reason"])
+        self.assertFalse(diagnostics["accepted"])
+
+    def test_pitch_abstention_includes_stage_and_event_state(self):
+        from stance_pipeline.analyzer import _rejected_result
+
+        result = _rejected_result("insufficient_window_coverage", ["pose"], ["coverage_low"])
+        self.assertFalse(result.accepted)
+        self.assertEqual("window_coverage", result.diagnostics["abstention_stage"])
+        self.assertEqual("insufficient_window_coverage", result.diagnostics["abstention_reason"])
+        self.assertIn("event_anchor", result.diagnostics)
 
 
 @unittest.skipUnless(
