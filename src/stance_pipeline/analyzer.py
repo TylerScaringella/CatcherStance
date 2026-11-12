@@ -292,6 +292,8 @@ class YOLOCatcherPoseExtractor:
     def __init__(self, model_path: Path, config: PitchStanceConfig):
         self.model = _load_model(model_path)
         self.config = config
+        self.last_diagnostics: dict = {}
+        self._last_catcher_diagnostic: dict = {}
 
     @staticmethod
     def _nearest_proposal(
@@ -359,7 +361,13 @@ class YOLOCatcherPoseExtractor:
         )
 
     def _full_frame_observation(self, frame_index: int, result) -> PoseObservation | None:
-        detection = detect_catcher_from_res_item(result, cfg=catcher_config)
+        catcher_diagnostics: dict = {}
+        detection = detect_catcher_from_res_item(
+            result,
+            cfg=catcher_config,
+            diagnostics=catcher_diagnostics,
+        )
+        self._last_catcher_diagnostic = catcher_diagnostics
         if detection is None:
             return None
         selected = int(detection["index"])
@@ -488,6 +496,9 @@ class YOLOCatcherPoseExtractor:
                 prepared.append((frame_index, frame, (0, 0), False, proposal))
 
         observations: list[PoseObservation] = []
+        catcher_reason_counts: Counter[str] = Counter()
+        pose_misses = 0
+        identity_jumps = 0
         pose_image_size = 640 if self.config.pose_on_crops else 512
         for batch in _batched(prepared, self.config.batch_size):
             results = self.model.predict(
@@ -499,13 +510,18 @@ class YOLOCatcherPoseExtractor:
                 ),
             )
             for (frame_index, _, offset, cropped, proposal), result in zip(batch, results):
+                self._last_catcher_diagnostic = {}
                 if cropped:
                     observation = self._crop_observation(frame_index, result, offset)
                 elif proposal is not None:
                     observation = self._proposal_observation(frame_index, result, proposal)
                 else:
                     observation = self._full_frame_observation(frame_index, result)
+                diagnostic_reason = self._last_catcher_diagnostic.get("reason")
+                if diagnostic_reason:
+                    catcher_reason_counts[diagnostic_reason] += 1
                 if observation is None:
+                    pose_misses += 1
                     continue
                 if observations:
                     previous = observations[-1]
@@ -513,8 +529,16 @@ class YOLOCatcherPoseExtractor:
                     center = (observation.box[:2] + observation.box[2:]) / 2.0
                     scale = max(float(previous.box[3] - previous.box[1]), 1.0)
                     if np.linalg.norm(center - previous_center) / scale > 1.25:
+                        identity_jumps += 1
                         continue
                 observations.append(observation)
+        self.last_diagnostics = {
+            "sampled_frames": len(prepared),
+            "observations": len(observations),
+            "pose_misses": pose_misses,
+            "identity_jumps": identity_jumps,
+            "catcher_rejection_reasons": dict(catcher_reason_counts),
+        }
         return observations
 
 
@@ -625,6 +649,29 @@ def _rejected_result(
     anchor: EventAnchor | None = None,
     diagnostics: dict | None = None,
 ) -> PitchStanceResult:
+    diagnostic_payload = {
+        "abstained": True,
+        "abstention_reason": reason,
+        "abstention_stage": {
+            "empty_video": "video",
+            "invalid_temporal_search_range": "temporal_bounds",
+            "insufficient_valid_pose_frames": "pose_extraction",
+            "no_stable_set_stance_window": "stable_window",
+            "window_crosses_impact": "event_window",
+            "insufficient_window_coverage": "window_coverage",
+            "insufficient_contiguous_classifier_frames": "classifier_sequences",
+            "ambiguous_stance_vote": "classifier_vote",
+        }.get(reason, "pipeline"),
+        "event_anchor": {
+            "available": anchor is not None,
+            "frame_index": anchor.frame_index if anchor else None,
+            "source": anchor.source if anchor else None,
+            "confidence": anchor.confidence if anchor else None,
+            "event_type": getattr(anchor, "event_type", "model_anchor") if anchor else "motion_fallback",
+            "uncertainty_frames": getattr(anchor, "uncertainty_frames", None) if anchor else None,
+        },
+    }
+    diagnostic_payload.update(diagnostics or {})
     return PitchStanceResult(
         label=None,
         confidence=0.0,
@@ -637,7 +684,7 @@ def _rejected_result(
         detector_provenance=list(provenance),
         quality_flags=list(flags),
         rejection_reason=reason,
-        diagnostics=diagnostics or {},
+        diagnostics=diagnostic_payload,
     )
 
 
@@ -762,6 +809,7 @@ def analyze_pitch_clip(
                 pose_end,
                 proposals,
             )
+            pose_extractor = retry_extractor
         else:
             observations = pose_extractor.extract(
                 path,
@@ -797,6 +845,7 @@ def analyze_pitch_clip(
                 "pose_search_end": pose_end,
                 "pose_observations": len(observations),
                 "camera_cuts": cuts,
+                "pose_extractor": getattr(pose_extractor, "last_diagnostics", {}),
             },
         )
     if window is None:
@@ -809,6 +858,7 @@ def analyze_pitch_clip(
                 "fps": fps,
                 "pose_observations": len(observations),
                 "camera_cuts": cuts,
+                "pose_extractor": getattr(pose_extractor, "last_diagnostics", {}),
             },
         )
     if anchor is not None and window.end_frame >= anchor.frame_index:
@@ -817,6 +867,11 @@ def analyze_pitch_clip(
             provenance,
             [*flags, "invalid_window"],
             anchor=anchor,
+            diagnostics={
+                "window_start_frame": window.start_frame,
+                "window_end_frame": window.end_frame,
+                "pose_extractor": getattr(pose_extractor, "last_diagnostics", {}),
+            },
         )
 
     expected_frames = (
@@ -829,7 +884,10 @@ def analyze_pitch_clip(
             provenance,
             [*flags, "low_pose_coverage"],
             anchor=anchor,
-            diagnostics={"coverage": coverage},
+            diagnostics={
+                "coverage": coverage,
+                "pose_extractor": getattr(pose_extractor, "last_diagnostics", {}),
+            },
         )
 
     classifier = config.stance_classifier or RollingMLPClassifier()
@@ -843,6 +901,11 @@ def analyze_pitch_clip(
             provenance,
             [*flags, "no_classifier_sequence"],
             anchor=anchor,
+            diagnostics={
+                "pose_extractor": getattr(pose_extractor, "last_diagnostics", {}),
+                "window_start_frame": window.start_frame,
+                "window_end_frame": window.end_frame,
+            },
         )
     vote_share = distribution[label]
     if vote_share < config.min_vote_share:
@@ -853,8 +916,13 @@ def analyze_pitch_clip(
             anchor=anchor,
             diagnostics={
                 "vote_distribution": distribution,
+                "vote_share": vote_share,
+                "classifier_sequences": sequence_count,
+                "pose_observations": len(observations),
+                "coverage": coverage,
                 "window_start_frame": window.start_frame,
                 "window_end_frame": window.end_frame,
+                "pose_extractor": getattr(pose_extractor, "last_diagnostics", {}),
             },
         )
 
@@ -877,6 +945,16 @@ def analyze_pitch_clip(
         quality_flags=flags,
         feature_vector=features,
         diagnostics={
+            "abstained": False,
+            "abstention_stage": None,
+            "event_anchor": {
+                "available": anchor is not None,
+                "frame_index": anchor.frame_index if anchor else None,
+                "source": anchor.source if anchor else None,
+                "confidence": anchor.confidence if anchor else None,
+                "event_type": getattr(anchor, "event_type", "model_anchor") if anchor else "motion_fallback",
+                "uncertainty_frames": getattr(anchor, "uncertainty_frames", None) if anchor else None,
+            },
             "fps": fps,
             "frame_count": frame_count,
             "camera_cuts": cuts,
@@ -886,6 +964,7 @@ def analyze_pitch_clip(
             "classifier_sequences": sequence_count,
             "window_motion_score": window.motion_score,
             "window_coverage": coverage,
+            "pose_extractor": getattr(pose_extractor, "last_diagnostics", {}),
             "event_confidence": anchor.confidence if anchor else None,
             "event_trajectory_length": anchor.trajectory_length if anchor else 0,
         },

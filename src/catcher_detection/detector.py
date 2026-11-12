@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -634,6 +635,7 @@ def detect_catcher(
     frame: Optional[np.ndarray] = None,
     cfg: Optional[CatcherDetectionConfig] = None,
     debug: bool = False,
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Detect one catcher or abstain with None.
@@ -647,7 +649,11 @@ def detect_catcher(
 
     cfg = cfg or CatcherDetectionConfig()
 
+    diagnostic = diagnostics if diagnostics is not None else {}
+    diagnostic.clear()
+    diagnostic.update({"stage": "frame_gate", "accepted": False, "candidate_rejection_reasons": {}})
     if result is None or result.boxes is None or len(result.boxes) == 0 or result.keypoints is None:
+        diagnostic.update({"reason": "no_pose_detections", "candidate_count": 0})
         if debug:
             print("No pose detections available.")
         return None
@@ -674,6 +680,11 @@ def detect_catcher(
         debug=debug,
     )
     if not valid_frame:
+        diagnostic.update({
+            "reason": gate_meta["reason"],
+            "candidate_count": len(boxes),
+            "gate_candidates": gate_meta.get("gate_candidates", []),
+        })
         if debug:
             print(f"Abstain at frame gate: {gate_meta['reason']}")
         return None
@@ -724,6 +735,12 @@ def detect_catcher(
             )
 
     if not candidates:
+        diagnostic.update({
+            "stage": "candidate_filter",
+            "reason": "no_plausible_candidates",
+            "candidate_count": len(boxes),
+            "candidate_rejection_reasons": dict(Counter(item["reason"] for item in rejected)),
+        })
         if debug:
             print("Abstain: no plausible catcher candidates after filtering.")
         return None
@@ -735,6 +752,14 @@ def detect_catcher(
 
     # Final abstention: weak score means nobody looks enough like a catcher.
     if best["score"] < cfg.min_score:
+        diagnostic.update({
+            "stage": "score_gate",
+            "reason": "best_score_below_threshold",
+            "candidate_count": len(boxes),
+            "best_score": best["score"],
+            "min_score": cfg.min_score,
+            "candidate_rejection_reasons": dict(Counter(item["reason"] for item in rejected)),
+        })
         if debug:
             print(f"Abstain: best score too low ({best['score']:.3f} < {cfg.min_score:.3f})")
         return None
@@ -747,6 +772,15 @@ def detect_catcher(
         effective_max_final_anchor_dist = max(effective_max_final_anchor_dist, 0.36)
 
     if best["anchor_dist_norm"] > effective_max_final_anchor_dist:
+        diagnostic.update({
+            "stage": "anchor_gate",
+            "reason": "best_candidate_too_far_from_anchor",
+            "candidate_count": len(boxes),
+            "best_score": best["score"],
+            "anchor_dist_norm": best["anchor_dist_norm"],
+            "max_anchor_dist_norm": effective_max_final_anchor_dist,
+            "candidate_rejection_reasons": dict(Counter(item["reason"] for item in rejected)),
+        })
         if debug:
             print(
                 "Abstain: best candidate too far from catcher anchor "
@@ -756,10 +790,28 @@ def detect_catcher(
 
     # Final abstention: if winner barely beats runner-up, treat as ambiguous.
     if margin < cfg.min_margin:
+        diagnostic.update({
+            "stage": "margin_gate",
+            "reason": "ambiguous_winner",
+            "candidate_count": len(boxes),
+            "best_score": best["score"],
+            "margin": margin,
+            "min_margin": cfg.min_margin,
+            "candidate_rejection_reasons": dict(Counter(item["reason"] for item in rejected)),
+        })
         if debug:
             print(f"Abstain: ambiguous winner (margin={margin:.3f} < {cfg.min_margin:.3f})")
         return None
 
+    diagnostic.update({
+        "stage": "accepted",
+        "reason": "ok",
+        "accepted": True,
+        "candidate_count": len(boxes),
+        "best_score": best["score"],
+        "margin": margin,
+        "candidate_rejection_reasons": dict(Counter(item["reason"] for item in rejected)),
+    })
     return {
         "index": best["index"],
         "box": best["box"],
@@ -781,10 +833,12 @@ def detect_catcher_from_res_item(
     result: Any,
     cfg: Optional[CatcherDetectionConfig] = None,
     debug: bool = False,
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     return detect_catcher(
         result=result,
         frame=None,
         cfg=cfg,
         debug=debug,
+        diagnostics=diagnostics,
     )

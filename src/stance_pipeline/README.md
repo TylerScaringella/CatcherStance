@@ -47,3 +47,19 @@ runner uses one FIFO inference lease and overlaps downloads and compact-review e
 around it. A run requests the lease only after its first clip is ready, and each lease
 slot reuses one initialized analyzer without sharing mutable Ultralytics state with
 another active slot. Each completed pitch is atomically persisted before the next pitch begins.
+
+## Abstention audit
+
+The current staged analyzer emits structured diagnostics for every accepted or
+abstained clip. These diagnostics identify the pipeline stage and stable reason,
+along with event-anchor, pose coverage, temporal-window, and catcher-candidate
+evidence. To reproduce the current-pipeline baseline and generate a review manifest:
+
+```bash
+PYTHONPATH=src ./.venv/bin/python research/scripts/audit_abstentions.py
+```
+
+The audit keeps legacy frame-level research summaries separate from pitch-level
+results and includes unmatched local clips with an explicit empty label join. Do not
+relax a rejection gate solely to increase coverage; review identity continuity and
+pre-event timing evidence first.
