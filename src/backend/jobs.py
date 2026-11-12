@@ -8,7 +8,7 @@ import traceback
 from functools import lru_cache
 from pathlib import Path
 
-from .schedule import load_schedule
+from .schedule import DEFAULT_SEASON, ScheduleIdentityError, ScheduleUnavailableError, load_schedule
 from .review import enrich_result, load_review_state, review_summary
 from .storage import (
     RunLocation,
@@ -437,7 +437,17 @@ def _game_for_location(location: RunLocation, saved_job: dict) -> dict | None:
     game = saved_job.get("game")
     if isinstance(game, dict) and game.get("id"):
         return game
-    candidates = sorted(load_schedule().get("games", []), key=lambda game: len(game["id"]), reverse=True)
+    try:
+        candidates = load_schedule().get("games", [])
+    except (ScheduleIdentityError, ScheduleUnavailableError):
+        # An unpublished active season must not hide older runs from the run list.
+        # Fall back to the checked-in/current completed schedule for legacy runs
+        # that do not have their game object persisted in job.json.
+        try:
+            candidates = load_schedule(DEFAULT_SEASON).get("games", [])
+        except (ScheduleIdentityError, ScheduleUnavailableError):
+            candidates = []
+    candidates = sorted(candidates, key=lambda game: len(game["id"]), reverse=True)
     return next((game for game in candidates if location.run_id.startswith(game["id"])), None)
 
 
