@@ -369,6 +369,7 @@ function workspaceContext(section, detail = "2026 season") {
 }
 
 function scheduleFreshness(settings = state.scheduleSettings, schedule = state.schedule) {
+  if (schedule?.unpublished) return `Duke has not published the ${schedule.season} schedule yet`;
   if (settings?.error) return `Needs refresh · ${settings.error}`;
   if (schedule?.stale || settings?.stale) return "Using cached schedule · refresh recommended";
   if (settings?.last_successful_refresh_at) return `Updated ${formatDateTime(settings.last_successful_refresh_at)}`;
@@ -744,12 +745,17 @@ function renderGames() {
       ]));
     }
     const advanced = element("details", { className: "advanced-settings" }, [
-      element("summary", { text: "Storage settings" }),
+      element("summary", { text: "Run settings" }),
       element("div", { className: "settings-grid" }, [
         element("label", { className: "check-row" }, [
           element("input", { id: "retainSources", type: "checkbox" }),
           element("span", { text: "Retain full source clips after compact reviews are created" }),
         ]),
+        element("label", { className: "field" }, [
+          element("span", { text: "Test run pitch limit" }),
+          element("input", { id: "pitchLimit", type: "number", min: 1, max: 25, step: 1, placeholder: "Full game", "aria-describedby": "pitchLimitHelp" }),
+        ]),
+        element("p", { id: "pitchLimitHelp", className: "muted", text: "Optional. Enter 1–25 to run the real download, classification, review, and export flow on only a few pitches. Leave blank for the full game." }),
         element("p", { className: "muted", text: "By default, full downloads are removed only after results and review clips validate." }),
       ]),
     ]);
@@ -782,12 +788,14 @@ function renderGames() {
 async function submitRun(game, container, reprocess = false) {
   const button = container.querySelector(reprocess ? ".hero-secondary" : ".button.primary");
   const retainSources = container.querySelector("#retainSources")?.checked || false;
+  const pitchLimitInput = container.querySelector("#pitchLimit");
+  const pitchLimit = pitchLimitInput?.value ? Number(pitchLimitInput.value) : null;
   button.disabled = true;
   button.textContent = "Starting…";
   try {
     const run = reprocess
-      ? await reprocessRun(game.id, { retain_sources: retainSources })
-      : await startRun({ game_id: game.id, retain_sources: retainSources });
+      ? await reprocessRun(game.id, { retain_sources: retainSources, pitch_limit: pitchLimit })
+      : await startRun({ game_id: game.id, retain_sources: retainSources, pitch_limit: pitchLimit });
     state.runs = [run, ...state.runs.filter((item) => item.id !== run.id)];
     liveRegion.textContent = `Run started for ${game.opponent}`;
     toast("Run started. You can continue using the application.", "success");

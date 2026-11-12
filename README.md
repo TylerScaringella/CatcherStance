@@ -35,6 +35,8 @@ python src/download_models.py all
 
 Useful environment variables include `CATCHER_STANCE_DEVICE`, `CATCHER_STANCE_PHC_MODEL`, and `CATCHER_STANCE_EVENT_MODEL`. See [`SETUP.md`](SETUP.md) for authentication, model setup, and troubleshooting.
 
+To exercise the complete live workflow without processing a whole game, open Run settings in the selected completed game, enter a Test run pitch limit from 1 to 25, and start detection. The run still discovers the game, downloads real pitch clips, classifies them, builds review media, supports analyst review, and enables Excel export after every selected pitch is finalized. Leave the field blank for a normal full-game run.
+
 ## How the staged model works
 
 The production analyzer is deliberately staged so a pose is not classified just because a person happens to be visible in one frame:

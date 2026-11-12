@@ -43,6 +43,8 @@ class WebContractTests(unittest.TestCase):
         self.assertIn("Knee-down Left", script)
         self.assertIn("Review action", script)
         self.assertIn("Download Excel for official sheet", script)
+        self.assertIn("pitchLimit", script)
+        self.assertIn("real download, classification, review, and export flow", script)
         self.assertIn("Save final stance", script)
         self.assertIn("Recover full source", script)
         self.assertIn("KneeDown - Left", script)
