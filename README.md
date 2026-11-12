@@ -35,6 +35,28 @@ python src/download_models.py all
 
 Useful environment variables include `CATCHER_STANCE_DEVICE`, `CATCHER_STANCE_PHC_MODEL`, and `CATCHER_STANCE_EVENT_MODEL`. See [`SETUP.md`](SETUP.md) for authentication, model setup, and troubleshooting.
 
+## Docker and Caddy deployment
+
+The repository includes a source-based Docker Compose deployment. It runs the Flask app privately behind Caddy at `https://catchers.duke.tylerscaringella.com`.
+
+On the deployment host:
+
+```bash
+cp .env.example .env
+chmod 600 .env
+# Edit .env and replace both secret values.
+mkdir -p data/auth data/cache data/runs data/tmp
+docker compose up -d --build
+docker compose ps
+curl https://catchers.duke.tylerscaringella.com/healthz
+```
+
+Before starting Caddy, point the hostname's A/AAAA record to the host and allow inbound TCP ports 80 and 443. UDP 443 is optional for HTTP/3. Caddy stores certificates in Docker volumes and obtains HTTPS automatically using the ACME email in `Caddyfile`.
+
+The application port is not published directly. Caddy is the only public service. Runtime state is bind-mounted from `./data`; protect `data/auth/` because it contains TruMedia bearer credentials. The app uses one Gunicorn worker because background run state is process-local. After pulling updates, rebuild with `docker compose up -d --build`. Inspect services with `docker compose logs -f app` and `docker compose logs -f caddy`.
+
+Back up `data/` and the `caddy_data` Docker volume separately. Do not commit `.env`, session JSON files, downloaded media, or runtime state. For complete deployment setup, permissions, DNS, certificate, and troubleshooting details, see [`SETUP.md`](SETUP.md).
+
 To exercise the complete live workflow without processing a whole game, open Run settings in the selected completed game, enter a Test run pitch limit from 1 to 25, and start detection. The run still discovers the game, downloads real pitch clips, classifies them, builds review media, supports analyst review, and enables Excel export after every selected pitch is finalized. Leave the field blank for a normal full-game run.
 
 While a live run is shown in Active Runs, use Pause to finish the current pitch and keep the run resumable, Stop to finish the current pitch and leave the run stopped, or Cancel to prevent resuming it. Each action asks for confirmation. Paused and stopped runs can be resumed from the same card; canceled runs retain their results until an authorized deletion. Deleting a terminal live run requires the admin token and a second confirmation. The checked-in sample remains read-only.
