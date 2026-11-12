@@ -1,201 +1,97 @@
 # Catcher Stance Detection
 
-My final project for Duke CS372 - Introduction to Applied Machine Learning.
+Catcher Stance Detection helps Duke baseball staff turn pitch video into a reviewable catcher-stance record. It gathers pitch clips, runs a staged detector, keeps evidence and provenance with every result, and lets an analyst correct or complete decisions before exporting a paste-ready workbook.
 
-## What it Does
+## The workflow
 
-Catcher Stance Detection is a multi-stage machine learning pipeline built to automate one of Duke Baseball's game tracking tasks: identifying the catcher's stance on every pitch. The project downloads pitch-by-pitch video clips for a selected game, runs YOLO pose detection on each clip, isolates the catcher from the detected players, converts the catcher's pose into fixed-length keypoint features, and classifies each pitch as `Knee-down Left`, `Knee-down Right`, or `Squat` with an MLP classifier. The goal is to reduce manual tracking work while preserving pitch-level information that can help identify whether a catcher may be unintentionally tipping pitch type through stance.
+1. Open the Games workspace and select a completed Duke game.
+2. Authenticate the TruMedia session when the game needs new footage.
+3. Gather pitch clips and start an analysis run.
+4. The pipeline identifies the catcher, anchors the pitch event, selects a pre-delivery window, and classifies the stance.
+5. Review accepted and abstained pitches in Results. The original model output stays visible; a reviewed value becomes the final value.
+6. Download the Excel handoff after every pitch has a final stance.
 
-## Quick Start
+The supported final labels are `KneeDown - Left`, `KneeDown - Right`, and `Squat`. Existing compact review clips, full source clips when available, pose overlays, quality flags, timing, votes, and provenance remain available in pitch detail.
 
-After completing the environment setup, run the web app from the project root:
+## Quick start
+
+From the project root, install the dependencies described in [`SETUP.md`](SETUP.md), then run:
 
 ```bash
 python src/app.py
 ```
 
-Then open `http://127.0.0.1:8000`. The Games workspace loads Duke's official schedule for the selected season, joins each game to prior analysis runs, and starts the TruMedia-to-detection workflow without requiring analysts to paste media URLs. Scheduled games remain visible but cannot be analyzed until they are completed.
+Open `http://127.0.0.1:8000`. The main routes are:
 
-New live runs require `CATCHER_STANCE_ADMIN_TOKEN` and an uploaded Playwright storage-state export. Existing results and the checked-in sample remain available without TruMedia access.
+- `#/games` — choose a game, manage the active season, and start or resume analysis.
+- `#/runs` — monitor queued and active work.
+- `#/results/<run-id>` — filter, review, and export pitch results.
 
-The refreshed interface has three linkable work areas:
-
-- `#/games`: choose a game and start, resume, or review a run
-- `#/runs`: monitor queued and active work while continuing to use the app
-- `#/results/<run-id>`: review stance totals, quality flags, timing, votes, and video
-
-Results support an analyst review pass before export. Open any pitch, switch between
-the full source clip and compact review, assign a final catcher pose, and optionally
-record a note. Model output remains visible separately from the final reviewed value.
-The Excel export is enabled only after every pitch has a saved final review and
-contains the two-column paste format `Pitch number` and `Catcher Pose`.
-
-The Games workspace loads the persisted active season. Authorized users can use Manage schedule to set the active season or manually refresh Duke's official schedule. Completed and scheduled games can be filtered by opponent, date, site, conference status, result, and analysis status. TruMedia games are resolved from the selected date's Scores dataset using Duke's team ID, opponent, result, and doubleheader game number. Ambiguous matches require explicit confirmation.
-
-Run progress is persisted on disk and refreshed when the browser regains focus, so
-switching views, changing browser tabs, or reloading does not detach the job. The
-browser polls lightweight run summaries every three seconds while work is active,
-every 30 seconds while idle, and pauses while hidden. Updates patch the existing
-progress elements rather than rebuilding the page, so search focus, dialogs, scroll
-position, and video playback remain stable.
-
-The repository includes a five-pitch sample run from Duke at Liberty on April 21, 2026 in `data/examples/duke-2026-04-21-liberty-sample/`. This lets graders inspect videos, manifests, and stance predictions without TruMedia access.
-
-For the accuracy-first detector, download the optional BaseballCV pitcher/hitter/catcher
-and glove/ball models:
+Live runs require `CATCHER_STANCE_ADMIN_TOKEN` and a Playwright storage-state export for TruMedia. The checked-in Liberty sample and existing results can be inspected without external credentials. Optional BaseballCV weights can be downloaded with:
 
 ```bash
 python src/download_models.py all
 ```
 
-The staged analyzer identifies the catcher and pitch impact first, then classifies only
-the stationary pre-impact set stance. `LKD` and `RKD` refer to the catcher's anatomical side.
-External weights are cached under the ignored `models/external/` directory.
+Useful environment variables include `CATCHER_STANCE_DEVICE`, `CATCHER_STANCE_PHC_MODEL`, and `CATCHER_STANCE_EVENT_MODEL`. See [`SETUP.md`](SETUP.md) for authentication, model setup, and troubleshooting.
 
-Run the fast unit and contract tests:
+## How the staged model works
+
+The production analyzer is deliberately staged so a pose is not classified just because a person happens to be visible in one frame:
+
+1. Scene and camera handling removes unusable frames and records cuts or coverage changes.
+2. Catcher proposals come from the catcher detector and pose candidates. Geometry, location, scale, and temporal continuity help reject the pitcher, batter, or a transient person.
+3. Ball/glove evidence is smoothed to estimate the pitch delivery and arrival event. A verified plate or receiving-zone event is preferred; bounded fallbacks are marked with lower confidence.
+4. A bounded window before the event is searched for a stable set stance. Post-receive movement must not enter the classification window.
+5. The selected catcher pose is normalized into temporal features, including a short sequence rather than a single image.
+6. The trained MLP classifier produces a stance, confidence, vote information, quality metadata, and provenance.
+7. Weak identity, timing, coverage, or classifier evidence causes abstention. An abstention is a review task, not a claim that the pitch has no stance.
+
+The current artifact and feature contract are described in `models/classifier/metadata.json` and the pipeline specification at [`research/specs/pitch_stance_pipeline_spec.md`](research/specs/pitch_stance_pipeline_spec.md). API payloads and stored result fields are compatibility contracts; presentation changes must not silently change them.
+
+## What it does well and where to be careful
+
+The system is useful for Duke-catching pitch clips when the catcher is visible and the camera view is stable. It separates catcher evidence from other detected players, uses temporal context, preserves timing/quality/provenance, supports resumable work, and allows analysts to correct both wrong classifications and abstentions.
+
+It is intentionally conservative. The labels are heavily imbalanced toward Knee-down Right, Squat has limited support, camera angle and occlusion affect catcher identity, and weak timing or coverage can produce an abstention. TruMedia session and media availability are also prerequisites for new footage. Official exports therefore require human review of every pitch.
+
+Historical notebook metrics are not the production quality claim. Current research uses source-group-aware evaluation and generated local outputs; do not promote a model from a row-wise split or a tiny rare-class sample.
+
+## Repository map and source of truth
+
+- `src/app.py`, `src/backend/`, and `src/stance_pipeline/` are production behavior.
+- `src/web/` is the vanilla DOM frontend; routes and API contracts remain stable.
+- `tests/` contains unit, contract, and optional browser coverage.
+- `data/examples/` is the checked-in Liberty sample for local inspection.
+- `models/classifier/` and `models/pose/` contain checked-in production artifacts; `models/external/` is an ignored cache.
+- `research/scripts/` contains active reproducible audits and benchmarks, not runtime behavior.
+- `research/outputs/generated/` and `research/annotations/generated/` are local generated outputs and are intentionally ignored.
+- `data/auth/`, `data/cache/`, `data/runs/`, `data/tmp/`, downloaded video, and processed datasets are runtime or private data and must remain ignored.
+- `docs/` contains durable project documentation, not a screenshot gallery or a generated report archive.
+
+Production paths are resolved through `src/project_paths.py` and backend storage helpers. Run state and exports belong inside their owning run directory and are written atomically. Never commit credentials, signed media URLs, videos, generated research reports, or local runtime state.
+
+## Tests and research commands
+
+Run the default suite from a clean checkout:
 
 ```bash
 PYTHONPATH=src ./.venv/bin/python -m unittest discover -s tests -v
 ```
 
-After downloading the BaseballCV assets, run the five-clip model regression:
+If Chromium is installed:
 
 ```bash
-python src/download_models.py all
-RUN_SAMPLE_MODEL_TESTS=1 CATCHER_STANCE_DEVICE=mps \
-  PYTHONPATH=src ./.venv/bin/python -m unittest discover -s tests -v
-```
-
-`CATCHER_STANCE_DEVICE=mps` is optional and specific to Apple Silicon. Omit it to
-let Ultralytics choose the available device. Custom model locations can be provided
-with `CATCHER_STANCE_PHC_MODEL` and `CATCHER_STANCE_EVENT_MODEL`.
-
-## Repository Layout
-
-- `src/`: Flask app, downloader, curator, pose pipeline, and catcher detection code
-- `data/auth/`: saved Playwright session state
-- `data/raw/`: source inputs and downloaded clip media
-- `data/processed/`: generated datasets and derived training files
-- `data/runs/`: active app output for new detection runs
-- `data/tmp/`: disposable per-job intermediate files, cleaned automatically
-- `data/cache/`: ignored runtime cache such as refreshed schedule data
-- `data/examples/`: checked-in sample outputs for review and grading
-- `models/classifier/`: trained stance classifier artifacts
-- `models/pose/`: pose model weights used by the curator and overlay code
-- `models/external/`: ignored cache for optional third-party detection weights
-- `research/`: notebooks and exploratory analysis
-
-## Runtime Storage Contract
-
-Production code resolves writable paths through `project_paths.py` and
-`backend/storage.py`; it must not write next to source modules or notebooks.
-Live outputs stay inside their owning `data/runs/<run-id>/` directory, reusable
-artifacts belong in that run's `artifacts/` folder, and incomplete work belongs
-under `data/tmp/`. Atomic per-pitch resume records live under the owning run's
-`state/pitches/` directory and are consolidated into the normal detection exports
-when processing completes. Writes to job state, resume records, and exports are atomic.
-Failed or authentication-blocked runs keep those resume records but do not publish
-canonical exports or report completion. Restarting the run skips every completed clip.
-
-The API resolves media from server-owned manifests and rejects traversal,
-absolute-path escapes, and symlink escapes. `data/examples/` is always read-only.
-Public result payloads never include local paths, stable media references, or signed URLs;
-existing downloadable CSV/JSON schemas remain compatible after finalization.
-Authentication state, runtime caches, temporary files, live runs, and external
-model weights are ignored by Git.
-
-## TruMedia And Media Lifecycle
-
-TruMedia credentials are never entered into the application. Export a browser session on a trusted workstation:
-
-```bash
-python src/trumedia_auth.py
-```
-
-Start the app with independent deployment secrets:
-
-```bash
-export CATCHER_STANCE_ADMIN_TOKEN='replace-with-a-long-random-value'
-export CATCHER_STANCE_SECRET_KEY='replace-with-an-independent-random-value'
-python src/app.py
-```
-
-Open the application and select **Connect TruMedia** in the persistent header. Enter the admin token and upload `data/auth/playwright_state.export.json`. The session can be configured, replaced, or revalidated before selecting a game; an expired session also reopens the same workflow when a run starts.
-
-The server validates the state in isolated headless Chromium before atomically installing it as `data/auth/playwright_state.json` with owner-only permissions. Both files are bearer credentials, are ignored by Git, and must never be committed or baked into a container image. Container deployments must mount `data/auth/` as a private writable volume and terminate TLS before Flask.
-
-For each matched game, the downloader reads the complete TruMedia pitch dataset and selects only pitches where Duke (`730336256`) is the catching team. Stable `s3://` media references are stored in the private run manifest; expiring signed AWS URLs are generated in short batches and never persisted. Downloads use atomic `.part` promotion and resumable manifests. Full source clips are removed by default only after detections and compact review MP4s validate. Failed or interrupted runs receive fresh media signatures when resumed.
-
-The GameTracker dialog is an interactive prototype. It validates a Google Sheets URL and simulates tab selection and export, but it does not contact Google or persist spreadsheet settings.
-
-## Throughput And Progress
-
-Downloads, inference, and compact-review generation form a bounded staged pipeline.
-Validated clips enter detection without waiting for the full game to download, and
-completed pitches become reviewable while later pitches continue processing. Multiple
-games may download concurrently, but game-level inference uses a FIFO accelerator lease.
-Runs enter that queue only after a validated clip is ready. Each inference slot reuses
-one initialized analyzer and owns its Ultralytics model state.
-
-The balanced defaults are eight total download slots, one inference worker, and one
-review encoder. Override them only after benchmarking the target machine:
-
-```bash
-export CATCHER_STANCE_DOWNLOAD_WORKERS=8
-export CATCHER_STANCE_INFERENCE_WORKERS=1
-export CATCHER_STANCE_REVIEW_WORKERS=1
-```
-
-One MPS inference worker is intentional. On the development Apple M3, processing the
-same two clips with competing pitch threads took `61.2s`, compared with `40.5s`
-sequentially. The pipeline gains throughput by overlapping independent stages rather
-than contending for the same accelerator and model objects.
-
-The fast checks run automatically on pull requests. To exercise real browser polling
-against temporary storage locally, install Chromium and run:
-
-```bash
-python -m playwright install chromium
 RUN_BROWSER_TESTS=1 PYTHONPATH=src ./.venv/bin/python \
   -m unittest discover -s tests -p 'test_web_browser.py' -v
 ```
 
-## Video Links
-
-- Demo video: [YouTube](https://youtu.be/cJP-MdaAUTA)
-- Technical walkthrough: [YouTube](https://youtu.be/flwCT_3V4m4)
-
-## Evaluation
-
-The checked-in MLP results below are historical notebook measurements from an unstratified
-row-wise holdout. They are retained for reproducibility, but are not the production quality
-claim: the current audit uses source-group-aware splits and a canonical generated dataset.
-
-Run the reproducible audit with:
+Active research entry points write generated results locally:
 
 ```bash
 PYTHONPATH=src ./.venv/bin/python research/scripts/audit_model.py
+PYTHONPATH=src ./.venv/bin/python research/scripts/audit_abstentions.py
+PYTHONPATH=src ./.venv/bin/python research/scripts/benchmark_staged_pipeline.py
 ```
 
-The audit currently reports 2,489 usable feature rows from 488 source groups: 2,196
-`Knee-down Right`, 289 `Knee-down Left`, and 4 `Squat`. Grouped evaluation has only five
-splits containing every class, so Squat is treated as insufficiently supported for promotion.
-The checked-in MLP is not replaced until a balanced, event-annotated holdout supports the
-promotion rule.
-
-| Class | Precision | Recall | F1-score | Support |
-| --- | ---: | ---: | ---: | ---: |
-| Knee-down Left | 0.51 | 0.72 | 0.60 | 57 |
-| Knee-down Right | 0.95 | 0.88 | 0.91 | 315 |
-| Squat | 0.00 | 0.00 | 0.00 | 2 |
-
-MLP validation accuracy: `85.3%`
-
-For comparison, I also tested a simple logistic regression baseline on the same stance classification task using the validation split.
-
-| Model | Validation Accuracy | Weighted Precision | Weighted Recall | Weighted F1-score |
-| --- | ---: | ---: | ---: | ---: |
-| Logistic Regression | 42.5% | 0.74 | 0.42 | 0.54 |
-| MLP Classifier | 85.3% | 0.87 | 0.85 | 0.86 |
-
-The MLP substantially outperformed the logistic regression baseline, especially in overall accuracy and weighted F1-score. The model performed best on `Knee-down Right`, which was also the most common class in the dataset. `Squat` performance is not reliable yet because there were only two squat examples in the test set.
+Read the nearest `AGENTS.md` before modifying code. The root guide explains project-wide rules; guides under `src/backend`, `src/stance_pipeline`, `src/web`, and `research` add subsystem constraints. Future work is recorded as a roadmap in [`docs/FUTURE_DIRECTIONS.md`](docs/FUTURE_DIRECTIONS.md), not as completed functionality.

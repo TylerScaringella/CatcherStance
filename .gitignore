@@ -44,6 +44,8 @@ data/examples/*
 # Downloaded third-party model assets and generated research diagnostics
 models/external/
 research/outputs/generated/
+research/outputs/*.json
+research/outputs/*.csv
 
 # Keep notebooks, source files, docs, and the trained lightweight classifier artifacts tracked intentionally.
 # Review manifests and experiment summaries are local generated artifacts.

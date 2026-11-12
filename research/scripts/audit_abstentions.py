@@ -199,16 +199,6 @@ def audit(rows: list[dict], config: PitchStanceConfig) -> tuple[list[dict], dict
             "label_source": "data/raw/labeled_videos/labeled-videos-2026-04-22-00-05-e3d836a2.csv",
         },
     }
-    legacy_path = Path("research/outputs/sample_pitch_stance_summary.json")
-    if legacy_path.exists():
-        legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
-        legacy_rows = legacy if isinstance(legacy, list) else legacy.get("clips", [])
-        summary["legacy_frame_level_summary"] = {
-            "path": str(legacy_path),
-            "clips": len(legacy_rows),
-            "frame_abstentions": sum(int(row.get("abstentions", 0)) for row in legacy_rows),
-            "scope": "historical frame-level detector summary; not current pitch-level abstention",
-        }
     return results, summary
 
 
@@ -230,7 +220,7 @@ def main() -> int:
     parser.add_argument("--labels", type=Path, default=RAW_LABELED_VIDEOS_DIR / "labeled-videos-2026-04-22-00-05-e3d836a2.csv")
     parser.add_argument("--video-root", type=Path, action="append", default=[Path("data/raw/downloads"), Path("data/examples/duke-2026-04-21-liberty-sample/downloads")])
     parser.add_argument("--limit", type=int, help="Audit only the first N manifest rows")
-    parser.add_argument("--output", type=Path, default=Path("research/outputs/abstention_audit_summary.json"))
+    parser.add_argument("--output", type=Path, default=Path("research/outputs/generated/abstention_audit_summary.json"))
     parser.add_argument("--report", type=Path, default=Path("research/outputs/generated/abstention_clip_report.jsonl"))
     parser.add_argument("--review-output", type=Path, default=Path("research/outputs/generated/abstention_review_manifest.csv"))
     parser.add_argument("--review-limit", type=int, default=60)

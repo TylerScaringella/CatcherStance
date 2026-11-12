@@ -1,6 +1,6 @@
 # Setup
 
-These instructions set up the catcher stance detection web app, install the Python dependencies, install the Playwright browser used for downloading TruMedia clips, and explain how to run and use the app.
+These instructions cover installation, credentials, local runtime setup, and smoke tests. Read the [README](README.md) for the human-language workflow, model explanation, source-of-truth rules, and repository map.
 
 ## Requirements
 
@@ -101,7 +101,7 @@ For containers, mount `data/auth/` as a private writable volume. Provide both se
 
 Completed games reuse their latest result. `Reprocess` creates a versioned run while preserving previous revisions.
 
-The repository includes a sample completed run at `data/examples/duke-2026-04-21-liberty-sample/` with five downloaded videos, `video_manifest.csv`, `detections.csv`, `detections.json`, `pitch_features.csv`, and `job.json`. Graders can inspect that run without TruMedia access. Running a fresh download still requires TruMedia access.
+The repository includes a sample completed run at `data/examples/duke-2026-04-21-liberty-sample/` with five downloaded videos, `video_manifest.csv`, `detections.csv`, `detections.json`, `pitch_features.csv`, and `job.json`. It can be inspected without TruMedia access. Running a fresh download still requires TruMedia access.
 
 ## Outputs
 
@@ -111,7 +111,7 @@ Each game run is written to:
 data/runs/<run-id>/
 ```
 
-Important output files:
+Important local output files:
 
 - `video_manifest.csv`: stable pitch/media identifiers, catcher metadata, local video paths, and download statuses; signed URLs are never persisted
 - `pitch_features.csv`: extracted catcher keypoint features for each pitch
@@ -151,6 +151,7 @@ Temporary processing files are created under `data/tmp/<run-id>-*` and removed
 after success or failure. Refreshed schedule data is stored in `data/cache/`
 rather than overwriting the checked-in schedule source.
 
+Generated research reports are written under ignored `research/outputs/generated/`.
 The main prediction fields in `detections.csv` are:
 
 - `pitch_index`: pitch number within the processed run
