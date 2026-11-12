@@ -28,6 +28,7 @@ ACTIVE_STATUSES = {
     "queued", "running", "resolving_game", "discovering_pitches", "downloading",
     "detecting", "building_review", "cleaning_up", "finalizing",
 }
+CONTROL_ACTIONS = {"pause", "stop", "cancel"}
 PROGRESS_STAGES = (
     "discovering_pitches",
     "downloading",
@@ -177,11 +178,65 @@ def write_job_state(job: dict) -> None:
 def set_job(job_id: str, **updates) -> None:
     with run_lock(job_id):
         with JOBS_LOCK:
-            current = JOBS.setdefault(job_id, {"id": job_id})
+            current = JOBS.get(job_id)
+            if current is None:
+                location = resolve_run(job_id)
+                current = _read_json(location.path / "job.json", {"id": job_id}) if location else {"id": job_id}
+                JOBS[job_id] = current
             current.update(updates)
             current["updated_at"] = time.time()
             job = dict(current)
         write_job_state(job)
+
+
+def control_request(job_id: str) -> str | None:
+    """Return a persisted cooperative control request for a live run."""
+    with JOBS_LOCK:
+        current = JOBS.get(job_id)
+        if current is not None and current.get("control_request"):
+            return str(current["control_request"])
+    location = resolve_run(job_id)
+    if location is None or location.read_only:
+        return None
+    saved = _read_json(location.path / "job.json", {})
+    value = saved.get("control_request")
+    return str(value) if value else None
+
+
+def request_control(job_id: str, action: str) -> dict:
+    if action not in CONTROL_ACTIONS:
+        raise ValueError("control action must be pause, stop, or cancel")
+    job = hydrated_job(job_id)
+    if job is None:
+        raise LookupError("run not found")
+    if job.get("read_only"):
+        raise PermissionError("sample runs are read-only")
+    status = str(job.get("status") or "")
+    if action == "cancel":
+        allowed = status in ACTIVE_STATUSES or status in {"paused", "stopped"}
+    else:
+        allowed = status in ACTIVE_STATUSES
+    if not allowed:
+        raise RuntimeError(f"cannot {action} a run in {status or 'unknown'} state")
+    set_job(job_id, control_request=action, message=f"{action.title()} requested; finishing the current pitch")
+    return hydrated_job(job_id) or job
+
+
+def finish_controlled_run(job_id: str, action: str) -> None:
+    terminal = {"pause": "paused", "stop": "stopped", "cancel": "canceled"}[action]
+    message = {
+        "pause": "Run paused safely and can be resumed.",
+        "stop": "Run stopped safely and can be resumed.",
+        "cancel": "Run canceled. Its partial evidence is retained until deleted.",
+    }[action]
+    set_job(
+        job_id,
+        status=terminal,
+        phase=terminal,
+        message=message,
+        control_request=None,
+        results_complete=False,
+    )
 
 
 def set_job_progress(
@@ -455,7 +510,11 @@ def job_from_location(location: RunLocation) -> dict | None:
     elif counts["total"] > 0:
         available = counts["downloaded"] + counts["cleaned"] + counts["skipped"]
         if available == counts["total"] and counts["failed"] == 0:
-            if saved.get("status") in ACTIVE_STATUSES and time.time() - updated_at < 600:
+            if saved.get("status") in {"paused", "stopped", "canceled"}:
+                job["status"] = saved["status"]
+                job["phase"] = saved["status"]
+                job["message"] = saved.get("message") or str(saved["status"]).replace("_", " ").title()
+            elif saved.get("status") in ACTIVE_STATUSES and time.time() - updated_at < 600:
                 job["status"] = saved.get("status")
                 job["phase"] = saved.get("phase", "detecting")
                 job["message"] = saved.get("message") or "Running catcher detection"
@@ -480,14 +539,14 @@ def job_from_location(location: RunLocation) -> dict | None:
         else:
             recent = time.time() - updated_at < 600
             status = saved.get("status") if recent else "interrupted"
-            if status not in ACTIVE_STATUSES and status != "auth_required":
+            if status not in ACTIVE_STATUSES and status not in {"auth_required", "paused", "stopped", "canceled"}:
                 status = "interrupted"
             saved_progress = saved.get("progress")
-            if status in {"detecting", "building_review"} and isinstance(saved_progress, dict):
+            if status in {"detecting", "building_review", "paused", "stopped", "canceled"} and isinstance(saved_progress, dict):
                 job.update(
                     status=status,
                     phase=saved.get("phase", status),
-                    message=saved.get("message") or "Running catcher detection",
+                    message=saved.get("message") or str(status).replace("_", " ").title(),
                     progress=saved_progress,
                 )
             else:
@@ -683,6 +742,10 @@ def run_existing_detection_job(job_id: str) -> None:
                 job_id, message, current, total, phase=phase, activate=activate
             ),
         )
+        action = control_request(job_id)
+        if action:
+            finish_controlled_run(job_id, action)
+            return
         from .media_lifecycle import finalize_run_media
 
         current = hydrated_job(job_id) or {}
@@ -726,7 +789,12 @@ def run_job(job_id: str, start_url: str) -> None:
                 job_id, message, current, total, phase=phase, activate=activate
             ),
             max_pitches=int((hydrated_job(job_id) or {}).get("pitch_limit") or 0) or None,
+            stop_requested=lambda: bool(control_request(job_id)),
         )
+        action = control_request(job_id)
+        if action:
+            finish_controlled_run(job_id, action)
+            return
         from .media_lifecycle import finalize_run_media
 
         current = hydrated_job(job_id) or {}

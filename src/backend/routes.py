@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import tempfile
 import threading
 import time
@@ -17,6 +18,7 @@ from project_paths import AUTH_DIR, PLAYWRIGHT_STATE_PATH, POSE_MODEL_PATH
 from .config import WEB_DIR
 from .jobs import (
     ACTIVE_STATUSES,
+    CONTROL_ACTIONS,
     JOBS,
     JOBS_LOCK,
     clip_media,
@@ -28,8 +30,8 @@ from .jobs import (
     list_run_summaries,
     manifest_row,
     run_existing_detection_job,
-    set_job,
     run_job,
+    request_control,
     write_job_state,
 )
 from .schedule import (
@@ -302,6 +304,47 @@ def register_routes(app):
             return _error("run not found", 404)
         return jsonify(job)
 
+    @app.post("/api/runs/<run_id>/control")
+    def control_run(run_id: str):
+        try:
+            validate_identifier(run_id, "run id")
+            action = str((request.get_json(silent=True) or {}).get("action") or "")
+            if action not in CONTROL_ACTIONS:
+                return _error("action must be pause, stop, or cancel", 400, "invalid_control_action")
+            job = request_control(run_id, action)
+            return jsonify(job), 202
+        except ValueError as exc:
+            return _error(str(exc), 400, "invalid_control_action")
+        except LookupError:
+            return _error("run not found", 404)
+        except PermissionError as exc:
+            return _error(str(exc), 409, "read_only_run")
+        except RuntimeError as exc:
+            return _error(str(exc), 409, "invalid_run_state")
+
+    @app.delete("/api/runs/<run_id>")
+    def delete_run(run_id: str):
+        if not _admin_authorized():
+            return _error("admin authorization is required", 401, "admin_required")
+        try:
+            validate_identifier(run_id, "run id")
+        except ValueError as exc:
+            return _error(str(exc), 400)
+        location = resolve_run(run_id)
+        if location is None:
+            return _error("run not found", 404)
+        if location.read_only:
+            return _error("sample runs are read-only", 409, "read_only_run")
+        job = hydrated_job(run_id)
+        if job is not None and job.get("status") in ACTIVE_STATUSES:
+            return _error("stop or cancel the active run before deleting it", 409, "run_active")
+        with run_lock(run_id):
+            if location.path.exists():
+                shutil.rmtree(location.path)
+        with JOBS_LOCK:
+            JOBS.pop(run_id, None)
+        return jsonify({"deleted": True, "run_id": run_id})
+
     @app.get("/api/games/<game_id>/latest-job")
     def latest_game_job(game_id: str):
         try:
@@ -537,6 +580,8 @@ def register_routes(app):
                 return _error("pitch_limit must be a whole number from 1 to 25", 400, "invalid_pitch_limit")
         force_redownload = bool(payload.get("force_redownload")) or reprocess
         latest_job = None if force_redownload else latest_job_for_game(requested_game_id)
+        if latest_job and latest_job.get("status") == "canceled":
+            latest_job = None
         if latest_job and latest_job.get("status") == "complete":
             return jsonify(latest_job), 200
 
@@ -569,6 +614,7 @@ def register_routes(app):
                 "status": "queued",
                 "phase": "queued",
                 "message": "Queued stance detection",
+                "control_request": None,
                 "updated_at": time.time(),
             }
             with JOBS_LOCK:
@@ -588,6 +634,7 @@ def register_routes(app):
                 "status": "queued",
                 "phase": "queued",
                 "message": "Queued download resume",
+                "control_request": None,
                 "updated_at": time.time(),
             }
             with JOBS_LOCK:

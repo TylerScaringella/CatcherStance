@@ -1,6 +1,8 @@
 import {
   apiUrl,
   confirmTruMediaMatch,
+  controlRun,
+  deleteRun,
   getRun,
   getRunSummaries,
   getSchedule,
@@ -361,7 +363,7 @@ function pageHeader(kicker, title, description, actions = []) {
 
 function workspaceContext(section, detail = "2026 season") {
   return element("div", { className: "workspace-context", "aria-label": "Workspace context" }, [
-    element("span", { className: "workspace-context-brand", text: "DUKE BASEBALL / FILM ROOM" }),
+    element("span", { className: "workspace-context-brand", text: "DUKE BASEBALL / OPERATIONS" }),
     element("span", { className: "workspace-context-separator", "aria-hidden": "true", text: "/" }),
     element("span", { text: section }),
     element("span", { className: "workspace-context-detail", text: detail }),
@@ -492,19 +494,74 @@ function gameRunAction(game, run) {
 }
 
 function runCardAction(run) {
-  return run.status === "complete" || run.result_count > 0
-    ? element("a", {
-        className: "button secondary", href: `#/results/${run.id}`, text: "Open results",
-        dataset: {
-          runAction: run.id,
-          actionKind: "card",
-          actionState: run.status === "complete" ? "complete" : `partial-${run.result_count}`,
-        },
-      })
-    : element("a", {
-        className: "button ghost", href: "#/games", text: "View game",
-        dataset: { runAction: run.id, actionKind: "card", actionState: run.status || "ready" },
-      });
+  const open = run.status === "complete" || run.result_count > 0
+    ? element("a", { className: "button secondary", href: `#/results/${run.id}`, text: "Open results" })
+    : element("a", { className: "button ghost", href: "#/games", text: "View game" });
+  const controls = [];
+  if (ACTIVE.has(run.status)) {
+    controls.push(
+      element("button", { className: "button ghost", type: "button", text: "Pause", on: { click: () => requestRunControl(run, "pause") } }),
+      element("button", { className: "button ghost", type: "button", text: "Stop", on: { click: () => requestRunControl(run, "stop") } }),
+      element("button", { className: "button danger-outline", type: "button", text: "Cancel", on: { click: () => requestRunControl(run, "cancel") } }),
+    );
+  } else if (run.status === "paused" || run.status === "stopped") {
+    controls.push(element("button", { className: "button secondary", type: "button", text: "Resume", on: { click: () => resumeRun(run) } }));
+  }
+  if (run.status === "complete" || run.status === "failed" || run.status === "interrupted" || run.status === "stopped" || run.status === "canceled") {
+    controls.push(element("button", { className: "button danger-outline", type: "button", text: "Delete", on: { click: () => deleteRunWithConfirmation(run) } }));
+  }
+  return element("div", {
+    className: "run-actions",
+    tabindex: "0",
+    role: "group",
+    "aria-label": `Actions for run ${run.id}`,
+    on: {
+      click: (event) => {
+        if (event.target.closest("button, a")) return;
+        window.location.hash = run.result_count > 0 ? `#/results/${run.id}` : "#/games";
+      },
+    },
+    dataset: { runAction: run.id, actionKind: "card", actionState: `${run.status}-${run.result_count || 0}` },
+  }, [open, ...controls]);
+}
+
+async function requestRunControl(run, action) {
+  const labels = { pause: "pause", stop: "stop after the current pitch", cancel: "cancel" };
+  if (!window.confirm(`Confirm ${labels[action]} this run?`)) return;
+  try {
+    await controlRun(run.id, action);
+    toast(`${action[0].toUpperCase()}${action.slice(1)} requested.`, "info");
+    await refreshRuns(true, true);
+  } catch (error) {
+    toast(error.message, "danger");
+  }
+}
+
+async function resumeRun(run) {
+  try {
+    const resumed = await startRun({ game_id: run.game?.id });
+    state.runs = [resumed, ...state.runs.filter((item) => item.id !== resumed.id)];
+    toast("Run resumed.", "success");
+    schedulePoll(500);
+  } catch (error) {
+    toast(error.message, "danger");
+  }
+}
+
+async function deleteRunWithConfirmation(run) {
+  if (!window.confirm(`Delete the finished run for ${run.game?.opponent || run.id}? This removes its videos, evidence, and exports permanently.`)) return;
+  openAdminUnlock(async () => {
+    try {
+      await deleteRun(run.id);
+      state.runs = state.runs.filter((item) => item.id !== run.id);
+      state.runDetails.delete(run.id);
+      toast("Run deleted.", "success");
+      if (route().view === "results" && route().id === run.id) location.hash = "#/runs";
+      else renderRuns();
+    } catch (error) {
+      toast(error.message, "danger");
+    }
+  });
 }
 
 function runBadge(run) {

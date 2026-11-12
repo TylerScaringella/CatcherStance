@@ -37,6 +37,10 @@ Useful environment variables include `CATCHER_STANCE_DEVICE`, `CATCHER_STANCE_PH
 
 To exercise the complete live workflow without processing a whole game, open Run settings in the selected completed game, enter a Test run pitch limit from 1 to 25, and start detection. The run still discovers the game, downloads real pitch clips, classifies them, builds review media, supports analyst review, and enables Excel export after every selected pitch is finalized. Leave the field blank for a normal full-game run.
 
+While a live run is shown in Active Runs, use Pause to finish the current pitch and keep the run resumable, Stop to finish the current pitch and leave the run stopped, or Cancel to prevent resuming it. Each action asks for confirmation. Paused and stopped runs can be resumed from the same card; canceled runs retain their results until an authorized deletion. Deleting a terminal live run requires the admin token and a second confirmation. The checked-in sample remains read-only.
+
+The application is branded **Duke Catcher Detection** with the **Baseball Operations** workspace label. The route and API behavior remain unchanged.
+
 ## How the staged model works
 
 The production analyzer is deliberately staged so a pose is not classified just because a person happens to be visible in one frame:
