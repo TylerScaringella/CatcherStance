@@ -107,6 +107,8 @@ def register_routes(app):
             return jsonify(completed_schedule(season))
         except ValueError as exc:
             return _error(str(exc), 400)
+        except ScheduleUnavailableError as exc:
+            return _error(str(exc), 409, "schedule_unpublished")
         except Exception:
             return _error("schedule is temporarily unavailable", 503, "schedule_unavailable")
 

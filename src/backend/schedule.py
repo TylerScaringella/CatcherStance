@@ -15,6 +15,7 @@ from .storage import atomic_write_json
 
 DEFAULT_TEAM = "duke"
 DEFAULT_SEASON = 2026
+SCHEDULE_SOURCE_VERSION = 2
 
 
 class ScheduleIdentityError(RuntimeError):
@@ -131,11 +132,18 @@ class DukeScheduleProvider(ScheduleProvider):
         request = Request(source, headers={"User-Agent": "CatcherStance/1.0"})
         with urlopen(request, timeout=20) as response:
             html = response.read().decode("utf-8", errors="replace")
-        title_match = re.search(r"<title>\s*(\d{4})\s+Baseball\s+Schedule", html, re.IGNORECASE)
-        if title_match and int(title_match.group(1)) != season:
+        heading_match = re.search(r"(?<!\d)(\d{4})\s+Baseball\s+Schedule", html, re.IGNORECASE)
+        if not heading_match:
             raise ScheduleUnavailableError(
-                f"Duke published {title_match.group(1)} instead of requested {season}"
+                f"Duke did not identify a published baseball schedule for {season}"
             )
+        published_season = int(heading_match.group(1))
+        if published_season != season:
+            raise ScheduleUnavailableError(
+                f"Duke published {published_season} instead of requested {season}"
+            )
+        if not re.search(r"Duke University", html, re.IGNORECASE):
+            raise ScheduleIdentityError("schedule page is not Duke University Athletics")
         games = parse_duke_schedule_table(html, season)
         if not games:
             raise ScheduleUnavailableError(f"Duke has not published a schedule for {season}")
@@ -146,6 +154,7 @@ class DukeScheduleProvider(ScheduleProvider):
             "season": season,
             "source": source,
             "source_checked": datetime.now().date().isoformat(),
+            "schedule_source_version": SCHEDULE_SOURCE_VERSION,
             "stale": False,
             "games": games,
         }
@@ -257,9 +266,10 @@ def load_schedule(
     cache = schedule_cache_path(team_id, season)
     if cache.exists() and not refresh:
         try:
-            return validate_duke_schedule_payload(
-                json.loads(cache.read_text(encoding="utf-8")), season
-            )
+            cached_payload = json.loads(cache.read_text(encoding="utf-8"))
+            if season != DEFAULT_SEASON and cached_payload.get("schedule_source_version") != SCHEDULE_SOURCE_VERSION:
+                raise ScheduleIdentityError("cached schedule uses an outdated source validator")
+            return validate_duke_schedule_payload(cached_payload, season)
         except (OSError, json.JSONDecodeError, ScheduleIdentityError):
             cache.unlink(missing_ok=True)
     try:
@@ -269,9 +279,10 @@ def load_schedule(
     except ScheduleUnavailableError as exc:
         if cache.exists():
             try:
-                payload = validate_duke_schedule_payload(
-                    json.loads(cache.read_text(encoding="utf-8")), season
-                )
+                cached_payload = json.loads(cache.read_text(encoding="utf-8"))
+                if season != DEFAULT_SEASON and cached_payload.get("schedule_source_version") != SCHEDULE_SOURCE_VERSION:
+                    raise ScheduleIdentityError("cached schedule uses an outdated source validator")
+                payload = validate_duke_schedule_payload(cached_payload, season)
                 payload["stale"] = True
                 payload["error"] = str(exc)
                 return payload
@@ -286,9 +297,10 @@ def load_schedule(
     except Exception as exc:
         if cache.exists():
             try:
-                payload = validate_duke_schedule_payload(
-                    json.loads(cache.read_text(encoding="utf-8")), season
-                )
+                cached_payload = json.loads(cache.read_text(encoding="utf-8"))
+                if season != DEFAULT_SEASON and cached_payload.get("schedule_source_version") != SCHEDULE_SOURCE_VERSION:
+                    raise ScheduleIdentityError("cached schedule uses an outdated source validator")
+                payload = validate_duke_schedule_payload(cached_payload, season)
                 payload["stale"] = True
                 payload["error"] = str(exc)
                 return payload

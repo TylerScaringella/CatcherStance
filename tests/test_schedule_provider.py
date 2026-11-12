@@ -124,12 +124,40 @@ class DukeScheduleProviderTests(unittest.TestCase):
                 return False
 
             def read(self):
-                return b"<title>2026 Baseball Schedule - Duke University</title>"
+                return b"<title>Duke University</title><h1>2026 Baseball Schedule</h1>"
 
         with patch("backend.schedule.urlopen", return_value=Response()), self.assertRaisesRegex(
             schedule.ScheduleUnavailableError, "requested 2027"
         ):
             schedule.DukeScheduleProvider().fetch(2027)
+
+    def test_schedule_provider_requires_verified_schedule_heading(self):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b"<title>Duke University</title><h1>Baseball Schedule</h1>"
+
+        with patch("backend.schedule.urlopen", return_value=Response()), self.assertRaisesRegex(
+            schedule.ScheduleUnavailableError, "did not identify"
+        ):
+            schedule.DukeScheduleProvider().fetch(2027)
+
+    def test_old_unverified_future_cache_cannot_be_served(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            schedule, "CACHE_DIR", Path(directory)
+        ), patch.object(schedule.PROVIDERS["duke"], "fetch", side_effect=schedule.ScheduleUnavailableError("not published")):
+            cache = Path(directory) / "duke_baseball_2027.json"
+            stale_wrong_season = self.payload(2027)
+            stale_wrong_season["source"] = "https://goduke.com/sports/baseball/schedule/text/2027"
+            cache.write_text(json.dumps(stale_wrong_season), encoding="utf-8")
+            with self.assertRaises(schedule.ScheduleUnavailableError):
+                schedule.load_schedule(2027)
+            self.assertFalse(cache.exists())
 
     def test_schedule_management_requires_admin_and_refreshes(self):
         payload = self.payload(2027)
@@ -155,6 +183,12 @@ class DukeScheduleProviderTests(unittest.TestCase):
             with client.session_transaction() as session:
                 session["trumedia_admin"] = True
             response = client.post("/api/teams/duke/schedule/refresh", json={"season": 2027})
+        self.assertEqual(409, response.status_code)
+        self.assertEqual("schedule_unpublished", response.get_json()["code"])
+
+    def test_unpublished_schedule_read_returns_explicit_status(self):
+        with patch("backend.routes.schedule_for_season", side_effect=schedule.ScheduleUnavailableError("not published")):
+            response = create_app().test_client().get("/api/schedule?season=2027&include_scheduled=1")
         self.assertEqual(409, response.status_code)
         self.assertEqual("schedule_unpublished", response.get_json()["code"])
 
