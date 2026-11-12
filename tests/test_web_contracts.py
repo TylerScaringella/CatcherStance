@@ -47,11 +47,16 @@ class WebContractTests(unittest.TestCase):
     def test_baseball_operations_visual_contract(self):
         index = (WEB_DIR / "index.html").read_text(encoding="utf-8")
         styles = (WEB_DIR / "styles.css").read_text(encoding="utf-8")
-        self.assertIn("ops-ui-1", index)
+        script = (WEB_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertIn("ops-ui-3", index)
         self.assertIn("game-context-strip", styles)
         self.assertIn("run-relationship", styles)
         self.assertIn("needs-attention", styles)
         self.assertIn("prefers-reduced-motion", styles)
+        self.assertIn("Manage schedule", script)
+        self.assertIn("Refresh from Duke", script)
+        self.assertIn("getScheduleSettings", script)
+        self.assertIn("schedule_unpublished", script)
 
     def test_static_and_run_routes_smoke(self):
         schedule_payload = {"team": "Duke", "season": 2026, "games": []}
@@ -65,6 +70,7 @@ class WebContractTests(unittest.TestCase):
                 "/api/schedule",
                 "/api/teams",
                 "/api/teams/duke/seasons",
+                "/api/teams/duke/schedule-settings",
                 "/api/teams/duke/schedule?season=2026",
                 "/api/integrations/trumedia/status",
                 "/api/runs",

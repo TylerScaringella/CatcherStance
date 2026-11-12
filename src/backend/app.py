@@ -5,7 +5,6 @@ import os
 from flask import Flask
 
 from .routes import register_routes
-from .schedule import start_schedule_refresh_job
 from .storage import initialize_storage
 
 
@@ -24,7 +23,6 @@ def create_app():
 
 
 def main():
-    start_schedule_refresh_job()
     app = create_app()
     print("Catcher Stance web app running at http://127.0.0.1:8000")
     app.run(host="127.0.0.1", port=8000, threaded=True)

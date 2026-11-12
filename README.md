@@ -14,7 +14,7 @@ After completing the environment setup, run the web app from the project root:
 python src/app.py
 ```
 
-Then open `http://127.0.0.1:8000`. The Games workspace loads Duke's official completed-game schedule for the selected season, joins each game to prior analysis runs, and starts the TruMedia-to-detection workflow without requiring analysts to paste media URLs.
+Then open `http://127.0.0.1:8000`. The Games workspace loads Duke's official schedule for the selected season, joins each game to prior analysis runs, and starts the TruMedia-to-detection workflow without requiring analysts to paste media URLs. Scheduled games remain visible but cannot be analyzed until they are completed.
 
 New live runs require `CATCHER_STANCE_ADMIN_TOKEN` and an uploaded Playwright storage-state export. Existing results and the checked-in sample remain available without TruMedia access.
 
@@ -24,7 +24,7 @@ The refreshed interface has three linkable work areas:
 - `#/runs`: monitor queued and active work while continuing to use the app
 - `#/results/<run-id>`: review stance totals, quality flags, timing, votes, and video
 
-The season selector defaults to 2026 and is ready for 2027. Completed games can be filtered by opponent, date, site, conference status, result, and analysis status. TruMedia games are resolved from the selected date's Scores dataset using Duke's team ID, opponent, result, and doubleheader game number. Ambiguous matches require explicit confirmation.
+The Games workspace loads the persisted active season. Authorized users can use Manage schedule to set the active season or manually refresh Duke's official schedule. Completed and scheduled games can be filtered by opponent, date, site, conference status, result, and analysis status. TruMedia games are resolved from the selected date's Scores dataset using Duke's team ID, opponent, result, and doubleheader game number. Ambiguous matches require explicit confirmation.
 
 Run progress is persisted on disk and refreshed when the browser regains focus, so
 switching views, changing browser tabs, or reloading does not detach the job. The

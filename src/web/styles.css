@@ -633,6 +633,21 @@ body {
 .schedule-opponent { font-size: 15px; }
 .schedule-meta { font-size: 12px; }
 .schedule-link { grid-area: link; color: var(--duke); font-size: 12px; font-weight: 700; }
+.schedule-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin: -8px 0 14px;
+  padding: 10px 14px;
+  border: 1px solid #dbe6ef;
+  border-radius: 8px;
+  background: #f7fbfe;
+  color: var(--muted);
+  font-size: 13px;
+}
+.schedule-status strong { color: var(--navy-900); }
+.schedule-status.stale { border-color: #e8cf9d; background: #fffaf0; }
+.schedule-freshness { margin: 4px 0 10px; padding: 10px 12px; border-radius: 7px; background: #f4f7fa; color: var(--muted); }
 .badge { min-height: 23px; padding: 2px 7px; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
 
 .game-hero {
@@ -707,6 +722,7 @@ body {
   .workspace-context-detail { display: none; }
   .page { padding-top: 26px; }
   .schedule-card { grid-template-columns: 72px minmax(0,1fr) auto; grid-template-areas: "date opponent badge" "date meta badge" "date link badge"; }
+  .schedule-status { align-items: flex-start; flex-direction: column; gap: 4px; }
   .game-context-strip { grid-template-columns: 1fr; gap: 10px; padding: 16px 18px; }
   .hero-facts { min-width: 0; align-self: start; padding: 10px 0 0; border-top: 1px solid rgba(255,255,255,.25); border-left: 0; }
   .hero-facts span { font-size: 25px; }

@@ -29,7 +29,17 @@ from .jobs import (
     run_job,
     write_job_state,
 )
-from .schedule import DEFAULT_SEASON, completed_schedule, find_game, validate_season
+from .schedule import (
+    DEFAULT_SEASON,
+    ScheduleUnavailableError,
+    completed_schedule,
+    find_game,
+    load_schedule_settings,
+    schedule_for_season,
+    refresh_schedule,
+    set_active_season,
+    validate_season,
+)
 from .storage import job_temp_dir, resolve_run, run_file, run_lock, validate_identifier
 from .trumedia import (
     AuthenticationRequired,
@@ -87,6 +97,8 @@ def register_routes(app):
     def schedule():
         try:
             season = validate_season(request.args.get("season", DEFAULT_SEASON))
+            if request.args.get("include_scheduled") in {"1", "true", "yes"}:
+                return jsonify(schedule_for_season(season, include_scheduled=True))
             return jsonify(completed_schedule(season))
         except ValueError as exc:
             return _error(str(exc), 400)
@@ -100,7 +112,40 @@ def register_routes(app):
     @app.get("/api/teams/duke/seasons")
     def seasons():
         current = time.gmtime().tm_year
-        return jsonify({"team_id": "duke", "default": DEFAULT_SEASON, "seasons": list(range(2026, current + 2))})
+        settings = load_schedule_settings()
+        available = sorted(set(range(2026, current + 2)) | {settings["active_season"]})
+        return jsonify({"team_id": "duke", "default": settings["active_season"], "seasons": available})
+
+    @app.get("/api/teams/duke/schedule-settings")
+    def schedule_settings():
+        return jsonify(load_schedule_settings())
+
+    @app.put("/api/teams/duke/schedule-settings")
+    def update_schedule_settings():
+        if not _admin_authorized():
+            return _error("admin authorization is required", 401, "admin_required")
+        try:
+            payload = request.get_json(silent=True) or {}
+            settings = set_active_season(payload.get("active_season"))
+            return jsonify(settings)
+        except ValueError as exc:
+            return _error(str(exc), 400, "invalid_season")
+
+    @app.post("/api/teams/duke/schedule/refresh")
+    def refresh_team_schedule():
+        if not _admin_authorized():
+            return _error("admin authorization is required", 401, "admin_required")
+        try:
+            payload = request.get_json(silent=True) or {}
+            season = validate_season(payload.get("season", load_schedule_settings()["active_season"]))
+            schedule_payload = refresh_schedule(season)
+            return jsonify({"settings": load_schedule_settings(), "schedule": schedule_payload})
+        except ValueError as exc:
+            return _error(str(exc), 400, "invalid_season")
+        except ScheduleUnavailableError as exc:
+            return _error(str(exc), 409, "schedule_unpublished")
+        except Exception:
+            return _error("schedule refresh failed; cached data was preserved", 503, "schedule_refresh_failed")
 
     @app.get("/api/teams/duke/schedule")
     def team_schedule():
