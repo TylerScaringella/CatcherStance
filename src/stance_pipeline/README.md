@@ -5,7 +5,7 @@ Orchestrates the full stance detection workflow after videos are available.
 Main modules:
 - `runner.py`: runs downloading plus stance detection for a game/run.
 - `detect.py`: extracts pitch features and writes stance prediction outputs.
-- `model.py`: loads the trained MLP classifier and predicts stance labels.
+- `model.py`: loads the trained MLP classifier and supports scalar or batched predictions.
 - `overlay.py`: renders pose overlays for the web app video preview.
 - `analyzer.py`: staged, frame-accurate clip analysis and temporal stance voting.
 - `assets.py`: verified download/lookup for optional BaseballCV model weights.
@@ -31,7 +31,18 @@ result = analyze_pitch_clip("pitch.mp4")
 print(result.label, result.confidence, result.quality_flags)
 ```
 
-`LKD` and `RKD` always refer to the catcher's anatomical side.
+`LKD` and `RKD` always refer to the catcher's anatomical side. Event anchors expose their
+source, type (`plate_arrival` or `trajectory_endpoint`), confidence, and frame uncertainty;
+the classifier window is bounded strictly before the anchor.
+
+The canonical generated feature dataset is
+`data/processed/dataset/keypoints-labeled.csv`. Rebuild the audit manifest and annotation
+review set with:
+
+```bash
+PYTHONPATH=src ./.venv/bin/python research/scripts/prepare_annotation_manifest.py
+PYTHONPATH=src ./.venv/bin/python research/scripts/audit_model.py
+```
 
 For multiple clips on one inference worker, reuse initialized components:
 

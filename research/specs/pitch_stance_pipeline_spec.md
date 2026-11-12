@@ -6,8 +6,8 @@ Build a frame-by-frame pipeline that turns each pitch clip into one pitch-level 
 `Squat`, anatomical `LKD`, or anatomical `RKD`.
 
 The implemented analyzer treats the clip as a temporal sequence and preserves source frame indices.
-BaseballCV PHC provides semantic catcher proposals, the glove model supplies a ball-trajectory impact
-anchor, and the existing pose/MLP artifacts classify only the stationary pre-impact set stance.
+BaseballCV PHC provides semantic catcher proposals, the glove model supplies a smoothed ball/plate
+event anchor, and the existing pose/MLP artifacts classify only the stationary pre-delivery set stance.
 
 ## Public Interface
 
@@ -28,8 +28,10 @@ anchor, and the existing pose/MLP artifacts classify only the stationary pre-imp
 1. Detect camera cuts without compacting the source-frame timeline.
 2. Run BaseballCV PHC at low frequency and retain the strongest contiguous catcher track.
 3. Run BaseballCV glove/ball/plate inference only over that broadcast segment.
-4. Select the longest plausible ball trajectory and use its plate-side endpoint as impact.
-5. Search `1.75-0.45s` before impact for a contiguous low-motion set window.
+4. Smooth plausible ball trajectories and prefer the closest frame inside the plate zone; use the
+   trajectory endpoint only when no credible plate arrival is observed.
+5. Search `1.75-0.45s` before impact, with an additional `120ms` safety margin, for a contiguous
+   low-motion set window that cannot cross delivery.
 6. Use PHC boxes to select the catcher from full-frame `512px` pose inference.
 7. Predict overlapping seven-frame MLP sequences and aggregate quality-weighted votes.
 8. Abstain on insufficient pose coverage, temporal discontinuity, or vote ambiguity.
@@ -44,6 +46,22 @@ anchor, and the existing pose/MLP artifacts classify only the stationary pre-imp
   checkpoint transfer stalled at 99% and ended with a server reset. No RF-DETR
   accuracy claim is made, and it is not promoted over the validated YOLO backend.
 - Without external assets, the analyzer uses the full-frame pose gate and motion-followed stable-window fallback.
+
+## Audit and timing validation
+
+`research/scripts/audit_model.py` is the source of truth for classifier comparisons. It joins
+the canonical generated dataset with raw labels, derives source groups, reports per-class and
+aggregate metrics, and records the dataset hash, metadata, environment, split coverage, and
+runtime. Its grouped results are not promotion evidence when a test split lacks a class.
+
+`research/annotations/pitch_event_annotation_manifest.csv` is a versioned pending review set.
+It currently contains 50 Left, 50 Right, and the 4 available Squat labels; blank event fields
+are intentional until a reviewer supplies frame-level annotations. No Squat performance claim
+is made until additional reviewed examples exist.
+
+Every event anchor carries an uncertainty interval and an explicit fallback type. Missing ball
+evidence may use the existing motion-followed window, but that path is flagged as fallback and
+cannot silently be treated as a verified delivery event.
 
 ## Pseudocode
 
