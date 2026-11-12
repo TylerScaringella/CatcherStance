@@ -171,6 +171,7 @@ h1, h2, h3, .brand, .metric-card strong, .pitch-number {
 .button.primary { color: white; background: var(--navy-900); }
 .button.secondary { color: white; background: var(--duke); border-color: var(--duke); }
 .button.ghost { color: var(--navy-900); background: transparent; border-color: var(--line); }
+.button.danger-outline { color: #a52a2a; background: #fff; border-color: #e3a4a4; }
 .button:disabled { opacity: .55; cursor: wait; }
 .games-layout { display: grid; grid-template-columns: minmax(300px, 390px) minmax(0, 1fr); gap: 18px; min-height: 650px; }
 .schedule-panel, .game-detail, .run-card, .results-panel, .metric-card {
@@ -277,6 +278,7 @@ input, select {
 .run-message { color: var(--muted); }
 .run-facts { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--muted); font-size: 13px; }
 .run-card > .button { margin-top: auto; }
+.run-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
 .badge { display: inline-flex; width: fit-content; min-height: 25px; align-items: center; padding: 2px 8px; border-radius: 999px; color: #435269; background: #edf0f4; font-size: 11px; font-weight: 750; letter-spacing: .02em; }
 .badge-success { color: var(--green); background: var(--green-soft); }
 .badge-progress, .badge-stance { color: #004b87; background: #dceeff; }

@@ -58,6 +58,7 @@ def _process_ready_rows(
     status_callback: StatusCallback | None,
     progress_callback: ProgressCallback | None,
     producer_error: Callable[[], BaseException | None] | None = None,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> list[dict]:
     existing_detections, _ = load_pitch_states(run_id)
     completed_ids = {item.clip_id for item in existing_detections}
@@ -123,6 +124,8 @@ def _process_ready_rows(
                 )
                 row = first_row
                 while row is not None:
+                    if stop_requested is not None and stop_requested():
+                        break
                     clip_id = str(row.get("clip_id") or "")
                     pitch_index = int(row.get("_analysis_index") or processed + 1)
                     detection, feature = detect_stance_for_row(row, pitch_index, analyzer)
@@ -172,6 +175,7 @@ def run_game_detection(
     discovery_callback=None,
     progress_callback: ProgressCallback | None = None,
     max_pitches: int | None = None,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> list[dict]:
     run_dir = RUNS_DIR / run_id
     download_dir = run_dir / "downloads"
@@ -229,6 +233,7 @@ def run_game_detection(
                 clip_ready_callback=ready_rows.put,
                 cancel_event=cancel_event,
                 max_pitches=max_pitches,
+                stop_requested=stop_requested,
             )
         except BaseException as exc:
             producer_errors.append(exc)
@@ -253,6 +258,7 @@ def run_game_detection(
             status_callback,
             progress_callback,
             producer_error=lambda: producer_errors[0] if producer_errors else None,
+            stop_requested=stop_requested,
         )
     finally:
         cancel_event.set()

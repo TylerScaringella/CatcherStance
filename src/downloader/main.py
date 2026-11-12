@@ -36,6 +36,7 @@ def run_download_pipeline(
     clip_ready_callback=None,
     cancel_event=None,
     max_pitches: int | None = None,
+    stop_requested=None,
 ):
     os.makedirs(download_dir, exist_ok=True)
     rows, by_clip_id, by_media_ref = load_manifest(manifest_path)
@@ -77,7 +78,7 @@ def run_download_pipeline(
                 )
             if discovery_callback is not None:
                 discovery_callback(dict(discovery))
-            if cancel_event is not None and cancel_event.is_set():
+            if (cancel_event is not None and cancel_event.is_set()) or (stop_requested is not None and stop_requested()):
                 return rows
 
             pending_rows = []
@@ -88,7 +89,7 @@ def run_download_pipeline(
                 if row.get("clip_id")
             }
             for analysis_index, row in enumerate(rows, start=1):
-                if cancel_event is not None and cancel_event.is_set():
+                if (cancel_event is not None and cancel_event.is_set()) or (stop_requested is not None and stop_requested()):
                     break
                 saved_path = row["saved_path"]
                 if saved_path and os.path.exists(saved_path):
@@ -114,12 +115,12 @@ def run_download_pipeline(
             row_lookup = {row["clip_id"]: row for row in rows if row.get("clip_id")}
             worker_count = max(1, int(download_workers))
             for offset in range(0, len(pending_rows), worker_count):
-                if cancel_event is not None and cancel_event.is_set():
+                if (cancel_event is not None and cancel_event.is_set()) or (stop_requested is not None and stop_requested()):
                     break
                 batch = pending_rows[offset : offset + worker_count]
                 signed_rows = []
                 for row in batch:
-                    if cancel_event is not None and cancel_event.is_set():
+                    if (cancel_event is not None and cancel_event.is_set()) or (stop_requested is not None and stop_requested()):
                         break
                     try:
                         row["download_url"] = sign_media_ref(page, row["media_ref"])

@@ -153,7 +153,9 @@ class BrowserPollingTests(unittest.TestCase):
     def test_polling_patches_partial_results_without_rebuilding_the_view(self):
         self.page.goto(f"{self.base_url}/#/runs", wait_until="networkidle")
         self.page.evaluate("window.__appRoot = document.querySelector('#appContent')")
-        self.assertEqual("View game", self.page.locator(f'[data-run-action="{self.run_id}"]').inner_text())
+        action = self.page.locator(f'[data-run-action="{self.run_id}"]')
+        self.assertIn("View game", action.inner_text())
+        self.assertIn("Pause", action.inner_text())
 
         self._publish_first_result()
         action = self.page.locator(f'[data-run-action="{self.run_id}"]')
@@ -168,7 +170,7 @@ class BrowserPollingTests(unittest.TestCase):
         self.page.wait_for_timeout(3500)
         self.assertTrue(action.evaluate("node => document.activeElement === node"))
 
-        action.click()
+        action.get_by_text("Open results").click()
         self.page.locator('[data-clip-id="clip-1"]').wait_for(timeout=5000)
         self.page.locator('[data-clip-id="clip-1"]').click()
         self.page.locator("#pitchDialog[open]").wait_for()
