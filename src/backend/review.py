@@ -74,10 +74,12 @@ def enrich_result(result: dict, state: dict) -> dict:
 
 def review_summary(results: list[dict]) -> dict:
     reviewed = sum(row.get("review_status") == "reviewed" for row in results)
+    attention = sum(bool(row.get("attention_required")) for row in results)
     return {
         "total": len(results),
         "reviewed": reviewed,
         "unresolved": len(results) - reviewed,
+        "attention": attention,
         "ready": bool(results) and reviewed == len(results),
     }
 
@@ -152,3 +154,19 @@ def build_xlsx(results: list[dict]) -> bytes:
         }.items():
             archive.writestr(name, content)
     return output.getvalue()
+
+
+def build_sheet_preview_html(results: list[dict]) -> str:
+    rows = sorted(results, key=lambda row: int(row.get("pitch_index") or 0))
+    body = []
+    for index, row in enumerate(rows, start=1):
+        pitch_number = int(row.get("pitch_index") or index)
+        pose = export_value(row) or ""
+        body.append(f"<tr><td>{pitch_number}</td><td>{html.escape(pose)}</td></tr>")
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Pitch review sheet</title>
+<style>body{{font:15px system-ui,sans-serif;margin:0;color:#172033;background:#fff}}header{{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #d9e0ea}}button{{border:1px solid #8794a8;background:#f7f9fc;border-radius:5px;padding:7px 10px;cursor:pointer}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #cbd3df;padding:9px 12px;text-align:left}}th{{background:#e9eef5;font-weight:700;position:sticky;top:0}}td:first-child,th:first-child{{width:140px}}</style>
+</head><body><header><strong>Paste-ready pitch review</strong><button id="copy" type="button">Copy table</button></header>
+<table id="sheet"><thead><tr><th>Pitch number</th><th>Catcher Pose</th></tr></thead><tbody>{"".join(body)}</tbody></table>
+<script>document.getElementById('copy').addEventListener('click',async()=>{{const rows=[...document.querySelectorAll('#sheet tr')].map(r=>[...r.cells].map(c=>c.textContent).join('\\t')).join('\\n');try{{await navigator.clipboard.writeText(rows);document.getElementById('copy').textContent='Copied';}}catch(_e){{document.getElementById('copy').textContent='Select and copy';}}}});</script>
+</body></html>"""

@@ -174,6 +174,9 @@ class BrowserPollingTests(unittest.TestCase):
         self.page.locator('[data-clip-id="clip-1"]').wait_for(timeout=5000)
         self.page.locator('[data-clip-id="clip-1"]').click()
         self.page.locator("#pitchDialog[open]").wait_for()
+        self.assertTrue(self.page.get_by_text("Full pitch source").is_visible())
+        self.assertTrue(self.page.get_by_text("Jump to delivery").is_visible())
+        self.assertTrue(self.page.get_by_text("Compact review").is_visible())
         self.page.evaluate(
             "window.__dialog = document.querySelector('#pitchDialog'); "
             "window.__video = document.querySelector('#pitchDialog video')"

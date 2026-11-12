@@ -279,6 +279,10 @@ input, select {
 .run-facts { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--muted); font-size: 13px; }
 .run-card > .button { margin-top: auto; }
 .run-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.media-timing { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0; }
+.media-timing-value { margin-right: auto; color: var(--muted); font-size: .88rem; }
+.sheet-preview-wrap { min-height: 52vh; border: 1px solid var(--line); background: #fff; }
+.sheet-preview-frame { display: block; width: 100%; height: 52vh; border: 0; }
 .badge { display: inline-flex; width: fit-content; min-height: 25px; align-items: center; padding: 2px 8px; border-radius: 999px; color: #435269; background: #edf0f4; font-size: 11px; font-weight: 750; letter-spacing: .02em; }
 .badge-success { color: var(--green); background: var(--green-soft); }
 .badge-progress, .badge-stance { color: #004b87; background: #dceeff; }
