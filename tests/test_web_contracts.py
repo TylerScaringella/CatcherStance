@@ -47,6 +47,10 @@ class WebContractTests(unittest.TestCase):
         self.assertIn("Recover full source", script)
         self.assertIn("KneeDown - Left", script)
         self.assertIn("savePitchReview", script)
+        self.assertIn("openAdminUnlock", script)
+        self.assertIn("checked-in sample is read-only", script)
+        self.assertIn("loadScheduleForSeason", script)
+        self.assertIn("schedule_unpublished", script)
         self.assertIn("recoverPitchSource", script)
         self.assertNotIn("innerHTML", script)
 

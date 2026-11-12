@@ -240,6 +240,42 @@ function openAuthentication(game = null, container = null, reprocess = false) {
   workflowDialog.showModal();
 }
 
+function openAdminUnlock(onUnlocked) {
+  const token = element("input", { type: "password", autocomplete: "current-password", placeholder: "Admin token", "aria-label": "Admin token" });
+  const status = element("p", { className: "form-status", text: "Review changes require the configured admin token." });
+  const unlock = element("button", {
+    className: "button primary", type: "button", text: "Unlock review actions",
+    on: { click: async () => {
+      if (!token.value) {
+        status.textContent = "Enter the admin token to continue.";
+        return;
+      }
+      unlock.disabled = true;
+      status.textContent = "Unlocking protected review actions…";
+      try {
+        await unlockAdmin(token.value);
+        closeWorkflow();
+        await onUnlocked();
+      } catch (error) {
+        status.textContent = error.message;
+        unlock.disabled = false;
+      }
+    } },
+  });
+  clear(workflowDialogContent).append(
+    workflowHeader("Protected action", "Unlock pitch review", "Enter the admin token configured for this server. No TruMedia upload is required to save a review."),
+    element("div", { className: "workflow-body" }, [
+      element("label", { className: "field" }, [element("span", { text: "Admin token" }), token]),
+      status,
+      element("div", { className: "dialog-actions" }, [
+        element("button", { className: "button ghost", type: "button", text: "Cancel", on: { click: closeWorkflow } }),
+        unlock,
+      ]),
+    ]),
+  );
+  workflowDialog.showModal();
+}
+
 function openMatchSelection(game, candidates, container, reprocess = false) {
   let selected = candidates[0]?.id || "";
   const options = candidates.map((candidate, index) => element("label", { className: "candidate-card" }, [
@@ -337,6 +373,25 @@ function scheduleFreshness(settings = state.scheduleSettings, schedule = state.s
   if (schedule?.stale || settings?.stale) return "Using cached schedule · refresh recommended";
   if (settings?.last_successful_refresh_at) return `Updated ${formatDateTime(settings.last_successful_refresh_at)}`;
   return "Not refreshed yet";
+}
+
+async function loadScheduleForSeason(season) {
+  try {
+    return await getSchedule(season);
+  } catch (error) {
+    if (error.code === "schedule_unpublished" || error.code === "schedule_unavailable") {
+      return {
+        team: "Duke",
+        team_id: "duke",
+        sport: "Baseball",
+        season: Number(season),
+        games: [],
+        unpublished: true,
+        error: error.message,
+      };
+    }
+    throw error;
+  }
 }
 
 function formatDateTime(value) {
@@ -497,7 +552,7 @@ function openScheduleManagement() {
         state.activeSeason = state.scheduleSettings.active_season;
         state.season = Number(season.value);
         state.selectedGameId = null;
-        state.schedule = await getSchedule(state.season);
+        state.schedule = await loadScheduleForSeason(state.season);
         toast(`${state.activeSeason} is now the active season.`, "success");
         status.textContent = scheduleFreshness();
         renderGames();
@@ -600,7 +655,7 @@ function renderGames() {
       state.season = Number(event.target.value);
       state.selectedGameId = null;
       try {
-        state.schedule = await getSchedule(state.season);
+        state.schedule = await loadScheduleForSeason(state.season);
         renderGames();
       } catch (error) {
         state.season = previousSeason;
@@ -1063,7 +1118,9 @@ function openPitch(run, row) {
   });
   const reviewStatus = element("p", {
     className: "form-status",
-    text: row.review_status === "reviewed" ? `Reviewed ${formatDateTime(row.reviewed_at)}` : "This pitch still needs a final stance.",
+    text: run.read_only
+      ? "The checked-in sample is read-only. Run a live analysis to save review changes."
+      : row.review_status === "reviewed" ? `Reviewed ${formatDateTime(row.reviewed_at)}` : "This pitch still needs a final stance.",
   });
   const reviewSelect = element("select", { "aria-label": "Final catcher pose" }, [
     ["", "Select final catcher pose"],
@@ -1091,6 +1148,15 @@ function openPitch(run, row) {
         pitchDialog.close();
         renderResults(run.id);
       } catch (error) {
+        if (error.code === "admin_required" || error.code === "admin_not_configured") {
+          reviewStatus.textContent = error.code === "admin_not_configured"
+            ? "Admin actions are not configured on this server. Set CATCHER_STANCE_ADMIN_TOKEN and restart it."
+            : "Admin authorization is required to save this review.";
+          if (error.code === "admin_required") openAdminUnlock(() => saveReviewButton.click());
+          saveReviewButton.disabled = false;
+          saveReviewButton.textContent = "Save final stance";
+          return;
+        }
         reviewStatus.textContent = error.message;
         saveReviewButton.disabled = false;
         saveReviewButton.textContent = "Save final stance";
@@ -1383,7 +1449,7 @@ async function bootstrap() {
     state.scheduleSettings = scheduleSettings;
     state.activeSeason = scheduleSettings.active_season;
     state.season = scheduleSettings.active_season;
-    state.schedule = await getSchedule(state.season);
+    state.schedule = await loadScheduleForSeason(state.season);
     state.seasons = seasonsPayload.seasons || [state.season];
     state.trumedia = trumedia;
     state.runs = summaries.payload?.runs || [];
